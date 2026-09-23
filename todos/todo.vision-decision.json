@@ -1,0 +1,827 @@
+{
+  "$schema": "https://ananta.local/schemas/todo.track.schema.json",
+  "version": "1.0",
+  "created": "2026-09-23",
+  "updated_at": "2026-09-23",
+  "owner": "Peter Stuiber / Ananta",
+  "track": "llama_cpp_vision_decision",
+  "title": "llama.cpp vision-decision: direkte multimodale Schema-Entscheidungen ueber /v1/decision",
+  "status": "partial",
+  "priority": "P0",
+  "status_scale": [
+    "todo",
+    "in_progress",
+    "partial",
+    "blocked",
+    "done"
+  ],
+  "priority_scale": [
+    "P0",
+    "P1",
+    "P2"
+  ],
+  "risk_scale": [
+    "low",
+    "medium",
+    "high",
+    "critical"
+  ],
+  "purpose": "Den vorhandenen /v1/decision Runner (thecodacus parallel-decision) so erweitern, dass ein VLM ein Bild direkt verarbeitet und mehrere typisierte Felder aus demselben multimodalen KV-Kontext bewertet.",
+  "goal": "Bild/Text -> libmtmd/mmproj -> multimodaler Prefill in eine Trunk-Sequenz -> bestehende Parallel-Decision-Engine -> typisierte Entscheidungen mit Probability und Timing.",
+  "architecture_decisions": [
+    "Die Decision-Engine bekommt keinen Vision-Stack; sie arbeitet auf vom Aufrufer vorgefuellten Trunk-Sequenzen.",
+    "Der Server nutzt die vorhandenen libmtmd- und Medienpfade (handle_media, mtmd_tokenize, mtmd_batch, mtmd_helper_decode_image_chunk).",
+    "Keine Bildbeschreibung als Zwischenstufe.",
+    "Nur endliche typisierte Kandidatenraeume; keine freie OCR/String-Extraktion.",
+    "Schema-Gueltigkeit ist keine fachliche Richtigkeit; Probability und Abstain machen Unsicherheit sichtbar."
+  ],
+  "documentation": "AGENT.md, tools/parallel-decision/README.md",
+  "tests": [
+    "tools/server/tests/unit/test_decision.py"
+  ],
+  "related_existing_work": [
+    "thecodacus/llama.cpp parallel-decision (b9244f893, 14d04e755)",
+    "ananta888/ananta vendor/llama.cpp-vision-decision (submodule)"
+  ],
+  "milestones": [
+    {
+      "id": "VD-M0",
+      "title": "Grundlagen: Audit, Tracking, Baseline",
+      "task_ids": [
+        "VD-001",
+        "VD-002",
+        "VD-003"
+      ],
+      "status": "partial"
+    },
+    {
+      "id": "VD-M1",
+      "title": "Engine-Abstraktion fuer vorgefuellte Kontexte",
+      "task_ids": [
+        "VD-010",
+        "VD-011"
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "VD-M2",
+      "title": "Qwen2.5-VL Single-Image End-to-End",
+      "task_ids": [
+        "VD-020",
+        "VD-021",
+        "VD-022"
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "VD-M3",
+      "title": "Ausbaustufe: Multi-Image, Batching, Cache, VLMs, Kalibrierung, Abstain, Security",
+      "task_ids": [
+        "VD-030",
+        "VD-031",
+        "VD-032",
+        "VD-033",
+        "VD-034",
+        "VD-035",
+        "VD-036",
+        "VD-037",
+        "VD-038"
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "VD-M4",
+      "title": "Benchmarks, Tests, CI, Doku, Playground, DoD",
+      "task_ids": [
+        "VD-040",
+        "VD-041",
+        "VD-042",
+        "VD-043",
+        "VD-044",
+        "VD-050"
+      ],
+      "status": "todo"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "VD-001",
+      "milestone_id": "VD-M0",
+      "title": "AGENT.md und Todo-Tracking anlegen",
+      "type": "documentation",
+      "status": "done",
+      "priority": "P0",
+      "risk": "low",
+      "depends_on": [],
+      "progress_percent": 100,
+      "implementation": [
+        "AGENT.md mit Zielarchitektur, Upstream-Beziehung, Entwicklungsregeln, Tests, Benchmarks und DoD anlegen.",
+        "Diese Todo im Ananta task_track Format anlegen und mit scripts/todo_status_sync.py + devtools/validate_todo_schema.py pruefen."
+      ],
+      "acceptance_criteria": [
+        "AGENT.md existiert im Repo-Root und verweist auf AGENTS.md und diese Todo.",
+        "Todo validiert gegen todos/todo.track.schema.json aus Ananta."
+      ],
+      "evidence": [
+        "AGENT.md",
+        "todos/todo.vision-decision.json"
+      ],
+      "implementation_note": "AGENT.md und todos/todo.vision-decision.json angelegt; Sync + Schema-Validierung mit Ananta-Tools laufen."
+    },
+    {
+      "id": "VD-002",
+      "milestone_id": "VD-M0",
+      "title": "Quellcode-Audit: parallel-decision, llama-server, libmtmd, KV/Sequence, M-RoPE",
+      "type": "research",
+      "status": "done",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [],
+      "progress_percent": 100,
+      "implementation": [
+        "decision-engine, Server-Integration (handle_decision), mtmd-API/Helper, llama-batch M-RoPE, KV seq_cp lesen.",
+        "Verifizierte Fakten mit Dateiverweis in AGENT.md eintragen."
+      ],
+      "acceptance_criteria": [
+        "Jede Architekturannahme in AGENT.md hat einen Codeverweis.",
+        "Positionslogik (n_pos vs n_tokens) fuer Qwen2.5-VL ist im Code belegt."
+      ],
+      "evidence": [
+        "AGENT.md#verified-facts-checked-in-this-tree-not-assumed"
+      ],
+      "implementation_note": "Engine, Server, libmtmd, llama-batch M-RoPE und KV seq_cp gelesen; Fakten mit Dateiverweisen in AGENT.md (Tabelle 'Verified facts')."
+    },
+    {
+      "id": "VD-003",
+      "milestone_id": "VD-M0",
+      "title": "Build und Baseline",
+      "type": "test",
+      "status": "partial",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [
+        "VD-002"
+      ],
+      "progress_percent": 40,
+      "implementation": [
+        "CPU-Release-Build von llama-server und llama-parallel-decision.",
+        "Text-only /v1/decision Baseline mit festem Modell/Request aufzeichnen (Werte und Wahrscheinlichkeiten).",
+        "Bestehende Server-Tests test_vision_api.py und test_basic.py als Regressionsbasis laufen lassen."
+      ],
+      "acceptance_criteria": [
+        "Baseline-Response ist als Datei gespeichert und reproduzierbar.",
+        "Bestehende Tests laufen gruen oder Abweichungen sind dokumentiert."
+      ],
+      "evidence": [
+        "build log: cmake --build ... BUILD_EXIT=0"
+      ],
+      "implementation_note": "CPU-Release-Build ok (llama-server, llama-parallel-decision, llama-mtmd-cli). Baseline und Regressionstests folgen, sobald Modelle geladen sind."
+    },
+    {
+      "id": "VD-010",
+      "milestone_id": "VD-M1",
+      "title": "Engine: Kontext als Text oder vom Aufrufer vorgefuellter Trunk",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "high",
+      "depends_on": [
+        "VD-002"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "context_input einfuehren: Text-Tokens (Engine dekodiert gepackt wie bisher) oder Prefill-Callback (Aufrufer fuellt die Trunk-Sequenz ab pos0 und liefert pos_next).",
+        "Branch-Positionen aus pos_next pro Trunk statt aus der Tokenanzahl ableiten.",
+        "Keine libmtmd-Abhaengigkeit in der Engine."
+      ],
+      "acceptance_criteria": [
+        "decision-engine.* inkludiert keine mtmd-Header.",
+        "Bestehende string-API bleibt als duenner Wrapper erhalten; CLI kompiliert unveraendert.",
+        "Fuer M-RoPE-Kontexte starten Branches bei pos_next des Trunks."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-011",
+      "milestone_id": "VD-M1",
+      "title": "Text-only Regression bitgenau",
+      "type": "test",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [
+        "VD-003",
+        "VD-010"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Baseline-Request aus VD-003 nach dem Refactor erneut ausfuehren und Werte/Wahrscheinlichkeiten vergleichen."
+      ],
+      "acceptance_criteria": [
+        "Entscheidungen identisch, Wahrscheinlichkeiten gleich (bis auf Float-Rauschen < 1e-5).",
+        "Automatisierter Test in tools/server/tests/unit/test_decision.py deckt Text-only ab."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-020",
+      "milestone_id": "VD-M2",
+      "title": "Server: multimodale contexts parsen (OpenAI content parts)",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [
+        "VD-010"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "contexts[i] darf String (unveraendert) oder Array aus {type:text}/{type:image_url} Parts sein.",
+        "Medien ueber vorhandenes handle_media laden (URL-Limits, --media-path, data-URI, base64).",
+        "Saubere Fehler, wenn kein mmproj geladen ist oder das Modell keine Vision kann."
+      ],
+      "acceptance_criteria": [
+        "Kein zweiter Medienlader; handle_media wird wiederverwendet.",
+        "Fehlerfaelle (kein mmproj, kaputtes Bild, falscher Part-Typ) liefern HTTP 400 mit klarer Meldung."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-021",
+      "milestone_id": "VD-M2",
+      "title": "Server: multimodaler Prefill ueber libmtmd in die Trunk-Sequenz",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "high",
+      "depends_on": [
+        "VD-020"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Gerenderten Tail per mtmd_tokenize in Chunks zerlegen (add_special nur ohne Shared-Prefix).",
+        "Text-Chunks dekodieren, Medien-Chunks per mtmd_encode/mtmd_batch encodieren und mit mtmd_helper_decode_image_chunk auf die Trunk-Sequenz dekodieren.",
+        "pos_next aus mtmd_input_chunk_get_n_pos akkumulieren."
+      ],
+      "acceptance_criteria": [
+        "Kein eigener Vision-Stack; nur libmtmd-API.",
+        "Normaler multimodaler Chat (test_vision_api.py) bleibt gruen."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-022",
+      "milestone_id": "VD-M2",
+      "title": "Qwen2.5-VL-3B Single-Image End-to-End",
+      "type": "test",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "high",
+      "depends_on": [
+        "VD-021"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Qwen2.5-VL-3B-Instruct Q4_K_M + mmproj laden, mehrere Felder zu einem Bild entscheiden.",
+        "Aequivalenztest: Tree-Wahrscheinlichkeit eines Feldes gegen Next-Token-Verteilung von /completion auf identischem multimodalem Prompt (renormalisiert) pruefen."
+      ],
+      "acceptance_criteria": [
+        "Aequivalenz innerhalb Toleranz (abs. Differenz < 1e-3) belegt -> Positionen und KV korrekt.",
+        "Plausible Entscheidungen auf Testbildern, Response mit probability und timings dokumentiert."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-030",
+      "milestone_id": "VD-M3",
+      "title": "Multi-Image pro Kontext",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "medium",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Mehrere image_url Parts in einem Kontext; Reihenfolge von Text und Bildern bleibt erhalten."
+      ],
+      "acceptance_criteria": [
+        "Test mit 2 Bildern in einem Kontext liefert korrekte Positionen (Aequivalenztest)."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-031",
+      "milestone_id": "VD-M3",
+      "title": "Multi-Context-Batching mit Bildern",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "high",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Mehrere multimodale Kontexte in einem Request; Bild-Encodes kontextuebergreifend ueber mtmd_batch buendeln, wo das Modell es erlaubt.",
+        "Ergebnisreihenfolge bleibt erhalten."
+      ],
+      "acceptance_criteria": [
+        "Batch-Ergebnisse identisch zu Einzel-Requests.",
+        "Encode-Batching messbar (Timing) oder begruendet nicht moeglich."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-032",
+      "milestone_id": "VD-M3",
+      "title": "KV-Budget und Gruppierung nach Tokenbudget",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "high",
+      "depends_on": [
+        "VD-031"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Gruppengroesse nicht nur nach Sequenzen, sondern auch nach KV-Zellen begrenzen (Bilder sind gross).",
+        "Klarer Fehler statt Absturz, wenn ein einzelner Kontext nicht passt."
+      ],
+      "acceptance_criteria": [
+        "Request mit vielen grossen Bildern laeuft ohne 'no KV space' durch oder liefert 400 mit Budget-Hinweis."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-033",
+      "milestone_id": "VD-M3",
+      "title": "Cache: Bild-Embeddings und Prefix",
+      "type": "performance",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "medium",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Pruefen, ob ein Embedding-Cache (Key = Bitmap-ID/SHA-256) den Encoder bei wiederholten Bildern spart; mit Byte-Limit (LRU).",
+        "Prefix-Cache (Schema/Instruktionen) weiter nutzen; cache-Statistik in usage melden."
+      ],
+      "acceptance_criteria": [
+        "Wiederholtes Bild: Encoder-Zeit messbar reduziert, Ergebnis identisch.",
+        "Speicherlimit konfigurierbar und eingehalten."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-034",
+      "milestone_id": "VD-M3",
+      "title": "Weitere VLMs und Positionstypen",
+      "type": "test",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "high",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Gemma 3 (nicht-kausale Bildattention, normale Positionen), SmolVLM (idefics3), Qwen3-VL (IMROPE) pruefen.",
+        "Kompatibilitaetsmatrix mit Belegen erstellen; nicht unterstuetzte Typen (z. B. HunyuanVL, Audio) konkret begruenden."
+      ],
+      "acceptance_criteria": [
+        "Mindestens 3 VLM-Familien mit Aequivalenztest belegt.",
+        "Matrix in README mit Modell, Quant, Positionstyp, Status."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-035",
+      "milestone_id": "VD-M3",
+      "title": "Tree- und Greedy-Decisions mit Vision",
+      "type": "test",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "medium",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Beide Modi auf multimodalen Trunks testen; grosse Felder (>tree_max) greedy."
+      ],
+      "acceptance_criteria": [
+        "Tree und Greedy liefern bei eindeutigen Feldern denselben Gewinner; Test vorhanden."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-036",
+      "milestone_id": "VD-M3",
+      "title": "Kalibrierung und Unsicherheitsmasse",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P2",
+      "risk": "medium",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Pro Feld Temperatur-Skalierung der Logits als Option; margin und entropy im Ergebnis.",
+        "Skript, das Temperatur auf gelabelten Daten fittet und ECE meldet."
+      ],
+      "acceptance_criteria": [
+        "Temperatur 1.0 aendert nichts (Regression).",
+        "Kalibrierungsskript dokumentiert und an einem Beispiel ausgefuehrt."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-037",
+      "milestone_id": "VD-M3",
+      "title": "Abstain/Fallback-Schnittstelle",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "medium",
+      "depends_on": [
+        "VD-036"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Option abstain: min_probability / min_margin pro Request oder Feld.",
+        "Ergebnis markiert betroffene Felder und listet sie fuer einen Fallback (z. B. groesseres Modell) auf; Entscheidung bleibt schema-gueltig."
+      ],
+      "acceptance_criteria": [
+        "Dokumentiert: Schema-Gueltigkeit ist keine fachliche Richtigkeit.",
+        "Test deckt abstain an und aus ab."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-038",
+      "milestone_id": "VD-M3",
+      "title": "Security und Ressourcenlimits",
+      "type": "security",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "high",
+      "depends_on": [
+        "VD-020",
+        "VD-032"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Limits: Bilder pro Request, Bilder gesamt, Bild-Tokens gesamt, Kontexte; vorhandene Medienregeln (Remote-Limits, --media-path) wiederverwenden.",
+        "Medien nur in contexts, nicht in instructions/schema.",
+        "Fehlerpfade raeumen Sequenzen auf (keine KV-Leichen)."
+      ],
+      "acceptance_criteria": [
+        "Jedes Limit hat einen Test oder einen reproduzierbaren curl-Beleg.",
+        "Nach einem Fehler funktionieren folgende Requests normal."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-040",
+      "milestone_id": "VD-M4",
+      "title": "Benchmarks",
+      "type": "benchmark",
+      "status": "todo",
+      "priority": "P1",
+      "risk": "medium",
+      "depends_on": [
+        "VD-022",
+        "VD-031",
+        "VD-033"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Vision-Decision vs Chat-Completion mit json_schema auf gleichem Bild/Schema (Latenz, Uebereinstimmung).",
+        "Skalierung ueber Anzahl Felder (1..16) auf einem Bild; Multi-Context; warm vs kalt."
+      ],
+      "acceptance_criteria": [
+        "Skripte in tools/parallel-decision/bench/, Ergebnisse mit Hardware/Modell/Befehl im README."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-041",
+      "milestone_id": "VD-M4",
+      "title": "Regressionstests",
+      "type": "test",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [
+        "VD-011",
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "tools/server/tests/unit/test_decision.py: Text-only, Vision (tinygemma3), Fehlerfaelle, Limits.",
+        "Keine neuen Dateien in tests/ (AGENTS.md)."
+      ],
+      "acceptance_criteria": [
+        "pytest gruen lokal; laeuft ohne GPU in wenigen Minuten."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-042",
+      "milestone_id": "VD-M4",
+      "title": "CI-Workflow im Fork",
+      "type": "infrastructure",
+      "status": "todo",
+      "priority": "P2",
+      "risk": "low",
+      "depends_on": [
+        "VD-041"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "GitHub-Actions-Workflow fuer vision-decision: CPU-Build + test_decision.py."
+      ],
+      "acceptance_criteria": [
+        "Workflow-Datei vorhanden und lokal mit act oder gleichwertigem Befehlsablauf nachvollzogen."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-043",
+      "milestone_id": "VD-M4",
+      "title": "Dokumentation",
+      "type": "documentation",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "low",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "README von parallel-decision: Vision-API, Beispiele, Limits, Modellmatrix, Benchmarks, Abstain/Kalibrierung, Grenzen (kein OCR/Freitext)."
+      ],
+      "acceptance_criteria": [
+        "Alle Request-Felder und Antwortfelder dokumentiert; Beispiele sind echte Antworten."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-044",
+      "milestone_id": "VD-M4",
+      "title": "Playground",
+      "type": "feature",
+      "status": "todo",
+      "priority": "P2",
+      "risk": "low",
+      "depends_on": [
+        "VD-022"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Einfache statische Seite: Bild hochladen, Schema editieren, /v1/decision aufrufen, Wahrscheinlichkeiten und Timings anzeigen."
+      ],
+      "acceptance_criteria": [
+        "Mit llama-server nutzbar, Anleitung im README."
+      ],
+      "evidence": []
+    },
+    {
+      "id": "VD-050",
+      "milestone_id": "VD-M4",
+      "title": "DoD-Nachweis",
+      "type": "test",
+      "status": "todo",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [
+        "VD-022",
+        "VD-031",
+        "VD-033",
+        "VD-040",
+        "VD-041",
+        "VD-043"
+      ],
+      "progress_percent": 0,
+      "implementation": [
+        "Abschlusslauf: Bild direkt ueber llama-server, mehrere Felder aus einem multimodalen KV-Kontext, Probability/Timing, Batching/Caching, Tests, Benchmarks, Doku."
+      ],
+      "acceptance_criteria": [
+        "Evidenz (Befehle, Antworten, Testlauf) in dieser Todo verlinkt."
+      ],
+      "evidence": []
+    }
+  ],
+  "critical_path_tasks": [
+    "VD-010",
+    "VD-020",
+    "VD-021",
+    "VD-022",
+    "VD-041",
+    "VD-050"
+  ],
+  "tasks_status_summary": {
+    "total": 23,
+    "by_status": {
+      "todo": 20,
+      "in_progress": 0,
+      "partial": 1,
+      "blocked": 0,
+      "done": 2
+    },
+    "progress_percent_done": 8.7,
+    "by_priority": {
+      "P0": 12,
+      "P1": 8,
+      "P2": 3,
+      "P3": 0
+    },
+    "by_risk": {
+      "low": 4,
+      "medium": 12,
+      "high": 7,
+      "critical": 0
+    },
+    "critical_path": {
+      "total": 6,
+      "done": 0,
+      "remaining": 6
+    },
+    "milestones": {
+      "total": 5,
+      "todo": 4,
+      "in_progress": 0,
+      "partial": 1,
+      "blocked": 0,
+      "done": 0
+    }
+  },
+  "log": [
+    {
+      "date": "2026-09-23",
+      "task": "VD-002",
+      "progress": "100",
+      "note": "Engine, Server, libmtmd, llama-batch M-RoPE und KV seq_cp gelesen; Fakten mit Dateiverweisen in AGENT.md (Tabelle 'Verified facts')."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-001",
+      "progress": "100",
+      "note": "AGENT.md und todos/todo.vision-decision.json angelegt; Sync + Schema-Validierung mit Ananta-Tools laufen."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-003",
+      "progress": "40",
+      "note": "CPU-Release-Build ok (llama-server, llama-parallel-decision, llama-mtmd-cli). Baseline und Regressionstests folgen, sobald Modelle geladen sind."
+    }
+  ],
+  "tasks_type_summary": {
+    "total": 23,
+    "by_type": {
+      "documentation": {
+        "total": 2,
+        "done": 1,
+        "partial": 0,
+        "blocked": 0,
+        "todo": 1,
+        "in_progress": 0,
+        "progress_percent": 50.0,
+        "by_status": {
+          "todo": 1,
+          "in_progress": 0,
+          "partial": 0,
+          "blocked": 0,
+          "done": 1
+        }
+      },
+      "research": {
+        "total": 1,
+        "done": 1,
+        "partial": 0,
+        "blocked": 0,
+        "todo": 0,
+        "in_progress": 0,
+        "progress_percent": 100.0,
+        "by_status": {
+          "todo": 0,
+          "in_progress": 0,
+          "partial": 0,
+          "blocked": 0,
+          "done": 1
+        }
+      },
+      "test": {
+        "total": 7,
+        "done": 0,
+        "partial": 1,
+        "blocked": 0,
+        "todo": 6,
+        "in_progress": 0,
+        "progress_percent": 5.7,
+        "by_status": {
+          "todo": 6,
+          "in_progress": 0,
+          "partial": 1,
+          "blocked": 0,
+          "done": 0
+        }
+      },
+      "feature": {
+        "total": 9,
+        "done": 0,
+        "partial": 0,
+        "blocked": 0,
+        "todo": 9,
+        "in_progress": 0,
+        "progress_percent": 0.0,
+        "by_status": {
+          "todo": 9,
+          "in_progress": 0,
+          "partial": 0,
+          "blocked": 0,
+          "done": 0
+        }
+      },
+      "performance": {
+        "total": 1,
+        "done": 0,
+        "partial": 0,
+        "blocked": 0,
+        "todo": 1,
+        "in_progress": 0,
+        "progress_percent": 0.0,
+        "by_status": {
+          "todo": 1,
+          "in_progress": 0,
+          "partial": 0,
+          "blocked": 0,
+          "done": 0
+        }
+      },
+      "security": {
+        "total": 1,
+        "done": 0,
+        "partial": 0,
+        "blocked": 0,
+        "todo": 1,
+        "in_progress": 0,
+        "progress_percent": 0.0,
+        "by_status": {
+          "todo": 1,
+          "in_progress": 0,
+          "partial": 0,
+          "blocked": 0,
+          "done": 0
+        }
+      },
+      "benchmark": {
+        "total": 1,
+        "done": 0,
+        "partial": 0,
+        "blocked": 0,
+        "todo": 1,
+        "in_progress": 0,
+        "progress_percent": 0.0,
+        "by_status": {
+          "todo": 1,
+          "in_progress": 0,
+          "partial": 0,
+          "blocked": 0,
+          "done": 0
+        }
+      },
+      "infrastructure": {
+        "total": 1,
+        "done": 0,
+        "partial": 0,
+        "blocked": 0,
+        "todo": 1,
+        "in_progress": 0,
+        "progress_percent": 0.0,
+        "by_status": {
+          "todo": 1,
+          "in_progress": 0,
+          "partial": 0,
+          "blocked": 0,
+          "done": 0
+        }
+      }
+    }
+  },
+  "progress_summary": {
+    "state": "partial",
+    "todo_remaining": 20,
+    "in_progress": 0,
+    "partial": 1,
+    "blocked": 0,
+    "done": 2,
+    "milestones_done": 0,
+    "milestones_total": 5
+  }
+}
