@@ -184,3 +184,19 @@ def test_decision_disabled():
     res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": ["x"]})
     assert res.status_code == 400
     assert "--decision-seqs" in res.body["error"]["message"]
+
+
+def test_decision_kv_budget():
+    global server
+    server.n_ctx = 1024
+    server.decision_seqs = 24
+    server.start()
+    long_text = "A long description of a sunny afternoon at the harbour with boats and people. " * 3
+    single = decide({"schema": SCHEMA, "contexts": [long_text]})["results"][0]
+    batch = decide({"schema": SCHEMA, "contexts": [long_text] * 20})
+    assert batch["usage"]["context_tokens"] > 1024
+    assert all(r["decision"] == single["decision"] for r in batch["results"])
+    res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": [image_context([0, 1, 0, 1])]})
+    assert res.status_code == 400
+    assert "does not fit the KV cache" in res.body["error"]["message"]
+    decide({"schema": SCHEMA, "contexts": [image_context([0])]})

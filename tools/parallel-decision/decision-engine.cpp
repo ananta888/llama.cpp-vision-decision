@@ -396,6 +396,18 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
     out.rows          = total * (int) contexts.size();
     out.items.resize(contexts.size());
 
+    // a group of trunks shares the KV cache with the cached prefix and one round of branch rows
+    const size_t n_kv    = llama_n_ctx(ctx);
+    const size_t n_batch = llama_n_batch(ctx);
+    std::vector<size_t> ctx_tokens(contexts.size());
+    for (size_t i = 0; i < contexts.size(); ++i) {
+        ctx_tokens[i] = contexts[i].prefill ? contexts[i].n_tokens : prefixes[i].size();
+        if (shared.size() + ctx_tokens[i] + std::min<size_t>(n_batch, total) > n_kv) {
+            throw std::invalid_argument("a decision context of " + std::to_string(ctx_tokens[i]) + " tokens does not fit the KV cache (" +
+                                        std::to_string(n_kv) + " cells, " + std::to_string(shared.size()) + " used by the instructions)");
+        }
+    }
+
     const auto t0 = std::chrono::steady_clock::now();
     out.cache_hit = prepare_prefix(shared, opt.allow_cache);
     out.prefill_ms += ms_since(t0);
@@ -415,8 +427,17 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
 
     // each context in a group holds one trunk sequence; the rest of the pool scores branches
     const size_t per_group = std::clamp<size_t>(n_pool / (1 + branches), 1, opt.max_group > 0 ? std::min(opt.max_group, contexts.size()) : contexts.size());
-    for (size_t g0 = 0; g0 < contexts.size(); g0 += per_group) {
-        const size_t n_group = std::min(per_group, contexts.size() - g0);
+    auto group_size = [&](size_t g0) {
+        size_t n = 1, used = shared.size() + ctx_tokens[g0];
+        while (g0 + n < contexts.size() && n < per_group &&
+               used + ctx_tokens[g0 + n] + std::min<size_t>(n_batch, (size_t) total * (n + 1)) <= n_kv) {
+            used += ctx_tokens[g0 + n];
+            ++n;
+        }
+        return n;
+    };
+    for (size_t g0 = 0, n_group = 0; g0 < contexts.size(); g0 += n_group) {
+        n_group = group_size(g0);
 
         const auto tp = std::chrono::steady_clock::now();
         const llama_pos pos_ctx = (llama_pos) shared.size();
