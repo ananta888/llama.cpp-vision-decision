@@ -44,6 +44,7 @@ struct options {
     size_t      tree_max       = 128;
     bool        split_boundary = false;  // legacy: tokenise suffix and values separately
     bool        allow_cache    = true;   // reuse the cached static prefix when it matches
+    size_t      max_group      = 0;      // most contexts prefilled and scored together (0 = as many as fit)
 };
 
 struct field_result {

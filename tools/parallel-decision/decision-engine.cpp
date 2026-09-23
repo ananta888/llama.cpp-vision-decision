@@ -414,7 +414,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
     std::vector<llama_pos> pos_next(contexts.size());
 
     // each context in a group holds one trunk sequence; the rest of the pool scores branches
-    const size_t per_group = std::clamp<size_t>(n_pool / (1 + branches), 1, contexts.size());
+    const size_t per_group = std::clamp<size_t>(n_pool / (1 + branches), 1, opt.max_group > 0 ? std::min(opt.max_group, contexts.size()) : contexts.size());
     for (size_t g0 = 0; g0 < contexts.size(); g0 += per_group) {
         const size_t n_group = std::min(per_group, contexts.size() - g0);
 

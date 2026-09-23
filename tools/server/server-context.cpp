@@ -830,6 +830,97 @@ static int process_mtmd_chunk(const server_slot & slot, mtmd::batch_ptr & mbatch
     return try_decode();
 }
 
+// /decision: a context is a string, or an array of "text" and "image_url" parts. Images become media
+// markers in the text and are loaded like chat images; parts are joined like chat message parts.
+static std::string decision_context_text(const json & c, const server_chat_params & opt, std::vector<raw_buffer> & files) {
+    if (c.is_string()) {
+        return c.get<std::string>();
+    }
+    if (!c.is_array() || c.empty()) {
+        throw std::invalid_argument("every entry of \"contexts\" must be a non-empty string or an array of content parts");
+    }
+    std::string text;
+    bool last_was_media = false;
+    for (const auto & p : c) {
+        const std::string type = json_value(p, "type", std::string());
+        if (type == "text") {
+            if (!last_was_media && !text.empty()) {
+                text += '\n';
+            }
+            text += json_value(p, "text", std::string());
+            last_was_media = false;
+        } else if (type == "image_url") {
+            if (!opt.allow_image) {
+                throw std::invalid_argument("image input is not supported - hint: if this is unexpected, you may need to provide the mmproj");
+            }
+            const json image_url = json_value(p, "image_url", json::object());
+            try {
+                handle_media(files, json_value(image_url, "url", std::string()), opt.media_path);
+            } catch (const std::exception & e) {
+                throw std::invalid_argument(e.what()); // a bad image url is a client error
+            }
+            text += get_media_marker();
+            last_was_media = true;
+        } else {
+            throw std::invalid_argument("decision context parts must be of type \"text\" or \"image_url\"");
+        }
+    }
+    return text;
+}
+
+// Encodes the media chunks of one /decision request in request order, several per mtmd batch when the
+// projector allows it. Uses its own mtmd batch, so slots that hold encoded media are not touched.
+struct decision_media_encoder {
+    mtmd_context * mctx;
+    std::vector<const mtmd_input_chunk *> media;
+    mtmd::batch_ptr batch;
+    double encode_ms = 0;
+
+    float * get(const mtmd_input_chunk * chunk) {
+        if (batch) {
+            if (float * embd = mtmd_batch_get_output_embd(batch.get(), chunk)) {
+                return embd;
+            }
+        }
+        auto it = std::find(media.begin(), media.end(), chunk);
+        GGML_ASSERT(it != media.end());
+        batch.reset(mtmd_batch_init(mctx));
+        while (it != media.end() && mtmd_batch_add_chunk(batch.get(), *it) == 0) {
+            ++it;
+        }
+        const int64_t t0 = ggml_time_us();
+        if (mtmd_batch_encode(batch.get()) != 0) {
+            batch.reset();
+            throw std::runtime_error("failed to encode the decision media");
+        }
+        encode_ms += (ggml_time_us() - t0) / 1000.0;
+        return mtmd_batch_get_output_embd(batch.get(), chunk);
+    }
+};
+
+// Decode the chunks of a decision context on seq from pos0, the way slots decode them. Media advance the
+// position by their n_pos, which differs from their token count for M-RoPE models.
+static llama_pos decision_prefill_chunks(mtmd_context * mctx, llama_context * ctx, decision_media_encoder & enc,
+                                         const mtmd_input_chunks * chunks, llama_seq_id seq, llama_pos pos0) {
+    const int32_t n_batch = llama_n_batch(ctx);
+    llama_pos n_past = pos0;
+    for (size_t i = 0; i < mtmd_input_chunks_size(chunks); ++i) {
+        const mtmd_input_chunk * chunk = mtmd_input_chunks_get(chunks, i);
+        if (mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+            if (mtmd_helper_eval_chunk_single(mctx, ctx, chunk, n_past, seq, n_batch, false, &n_past) != 0) {
+                throw std::runtime_error("failed to decode the decision context text");
+            }
+            continue;
+        }
+        llama_pos n_next = n_past;
+        if (mtmd_helper_decode_image_chunk(mctx, ctx, chunk, enc.get(chunk), n_past, seq, n_batch, &n_next, nullptr, nullptr) != 0) {
+            throw std::runtime_error("failed to decode the decision media");
+        }
+        n_past = n_next;
+    }
+    return n_past;
+}
+
 //
 // server_context_impl (private implementation)
 //
@@ -2388,11 +2479,12 @@ private:
             throw std::invalid_argument("\"contexts\" must be an array of 1-256 strings");
         }
         std::vector<std::string> contexts;
+        std::vector<std::vector<raw_buffer>> files(body.at("contexts").size());
         for (const auto & c : body.at("contexts")) {
-            if (!c.is_string() || c.get<std::string>().empty()) {
+            if (c.is_string() && c.get<std::string>().empty()) {
                 throw std::invalid_argument("every entry of \"contexts\" must be a non-empty string");
             }
-            contexts.push_back(c.get<std::string>());
+            contexts.push_back(decision_context_text(c, chat_params, files[contexts.size()]));
         }
         if (!body.contains("schema")) {
             throw std::invalid_argument("\"schema\" must be provided");
@@ -2418,7 +2510,67 @@ private:
         opt.tree_max    = (size_t) body.value("tree_max", 128);
         opt.allow_cache = body.value("cache_prompt", true);
 
-        const auto b = decision_engine->decide_batch(shared, dynamic, cs.inputs, opt);
+        // contexts with media are split into chunks by libmtmd and prefilled on their trunk by the engine
+        decision_media_encoder enc { mctx, {}, nullptr };
+        std::vector<mtmd::input_chunks_ptr> media_chunks;
+        std::vector<llama_decision::context_input> inputs(dynamic.size());
+        size_t n_media_tokens = 0;
+        bool   non_causal     = false;
+        for (size_t i = 0; i < dynamic.size(); ++i) {
+            if (files[i].empty()) {
+                inputs[i].text = dynamic[i];
+                continue;
+            }
+            mtmd::bitmaps bitmaps;
+            for (const auto & f : files[i]) {
+                auto out = mtmd_helper_bitmap_init_from_buf(mctx, f.data(), f.size(), false, init_opt);
+                mtmd_helper::video_ptr video(out.video_ctx);
+                if (!out.bitmap) {
+                    throw std::invalid_argument("failed to load a decision image");
+                }
+                bitmaps.entries.emplace_back(out.bitmap);
+                if (video || mtmd_bitmap_is_audio(out.bitmap)) {
+                    throw std::invalid_argument("decision contexts accept images only");
+                }
+            }
+            mtmd_input_text inp_txt = { dynamic[i].c_str(), dynamic[i].size(), /* add_special */ shared.empty(), /* parse_special */ true };
+            mtmd::input_chunks_ptr chunks(mtmd_input_chunks_init());
+            auto bitmaps_c_ptr = bitmaps.c_ptr();
+            const int32_t rc = mtmd_tokenize(mctx, chunks.get(), &inp_txt, bitmaps_c_ptr.data(), bitmaps_c_ptr.size());
+            if (rc != 0) {
+                throw std::invalid_argument(rc == 1 ? "the number of images does not match the media markers" : "failed to preprocess a decision image");
+            }
+            for (size_t k = 0; k < mtmd_input_chunks_size(chunks.get()); ++k) {
+                const mtmd_input_chunk * chunk = mtmd_input_chunks_get(chunks.get(), k);
+                if (mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+                    continue;
+                }
+                const size_t n_img = mtmd_input_chunk_get_n_tokens(chunk);
+                if (mtmd_decode_use_non_causal(mctx, chunk)) {
+                    // non-causal image attention needs the whole image in one ubatch
+                    if (n_img > llama_n_ubatch(ctx_tgt)) {
+                        throw std::invalid_argument(string_format("an image of %zu tokens needs a physical batch size (-ub) of at least %zu for this model (current: %u)",
+                                                                  n_img, n_img, llama_n_ubatch(ctx_tgt)));
+                    }
+                    non_causal = true;
+                }
+                enc.media.push_back(chunk);
+                n_media_tokens += n_img;
+            }
+            inputs[i].n_tokens = mtmd_helper_get_n_tokens(chunks.get());
+            const mtmd_input_chunks * c = chunks.get();
+            inputs[i].prefill = [this, &enc, c](llama_seq_id seq, llama_pos pos0) {
+                return decision_prefill_chunks(mctx, ctx_tgt, enc, c, seq, pos0);
+            };
+            media_chunks.push_back(std::move(chunks));
+        }
+
+        // a non-causal image decode depends on the KV cell layout of its sequence (also on the slot path):
+        // decide such contexts one at a time, so a result does not depend on the other contexts
+        if (non_causal) {
+            opt.max_group = 1;
+        }
+        const auto b = decision_engine->decide_batch(shared, inputs, cs.inputs, opt);
 
         size_t context_tokens = 0;
         for (const auto & r : b.items) {
@@ -2429,8 +2581,15 @@ private:
         usage["cached_tokens"]  = (long long) (b.cache_hit ? b.shared_tokens : 0);
         usage["context_tokens"] = (long long) context_tokens;
         usage["scored_rows"]    = b.rows;
+        if (!enc.media.empty()) {
+            usage["media_chunks"] = (long long) enc.media.size();
+            usage["media_tokens"] = (long long) n_media_tokens;
+        }
         json timings = json::object();
         timings["prefill_ms"] = b.prefill_ms;
+        if (!enc.media.empty()) {
+            timings["media_encode_ms"] = enc.encode_ms; // part of prefill_ms
+        }
         timings["scoring_ms"] = b.scoring_ms;
         timings["total_ms"]   = b.prefill_ms + b.scoring_ms;
         timings["rounds"]     = b.rounds;
