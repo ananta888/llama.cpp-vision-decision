@@ -1,0 +1,43 @@
+{
+ "n": 64,
+ "wall_s": 265.72,
+ "mean_per_decision_ms": 4145.4,
+ "fields": {
+  "shape": {
+   "accuracy": 1.0,
+   "mean_confidence": 0.9997,
+   "nll": 0.0003,
+   "ece": 0.0003,
+   "fitted_temperature": 0.05,
+   "nll_fitted": 0.0,
+   "ece_fitted": 0.0
+  },
+  "color": {
+   "accuracy": 1.0,
+   "mean_confidence": 1.0,
+   "nll": 0.0,
+   "ece": 0.0,
+   "fitted_temperature": 0.05,
+   "nll_fitted": 0.0,
+   "ece_fitted": 0.0
+  },
+  "count": {
+   "accuracy": 0.9375,
+   "mean_confidence": 0.9869,
+   "nll": 0.2016,
+   "ece": 0.0553,
+   "fitted_temperature": 2.029,
+   "nll_fitted": 0.1385,
+   "ece_fitted": 0.0577
+  },
+  "dark_background": {
+   "accuracy": 0.9375,
+   "mean_confidence": 0.9864,
+   "nll": 0.1612,
+   "ece": 0.0489,
+   "fitted_temperature": 1.745,
+   "nll_fitted": 0.13,
+   "ece_fitted": 0.0396
+  }
+ }
+}

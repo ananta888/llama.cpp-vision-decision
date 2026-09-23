@@ -1,0 +1,12 @@
+DoD: Qwen3-VL-2B Q8_0 via llama-server, 2 image contexts + 1 text context, 4 typed fields each
+ ctx 0 decision {"shape": "triangle", "color": "green", "count": 4, "dark_background": false} truth {"shape": "triangle", "color": "green", "count": 4, "dark_background": false} abstained []
+      probs {'shape': 1.0, 'color': 1.0, 'count': 1.0, 'dark_background': 0.9994}
+ ctx 1 decision {"shape": "triangle", "color": "blue", "count": 1, "dark_background": false} truth {"shape": "triangle", "color": "blue", "count": 1, "dark_background": false} abstained []
+      probs {'shape': 1.0, 'color': 1.0, 'count': 0.9997, 'dark_background': 0.9984}
+ ctx 2 decision {"shape": "circle", "color": "red", "count": 3, "dark_background": true} truth "(text)" abstained []
+      probs {'shape': 1.0, 'color': 1.0, 'count': 1.0, 'dark_background': 1.0}
+ cold usage {"prompt_tokens": 291, "cached_tokens": 0, "context_tokens": 175, "scored_rows": 60, "media_chunks": 2, "media_tokens": 128, "media_cached": 0} 
+ cold timings {"prefill_ms": 6084.8737949999995, "media_encode_ms": 1685.2440000000001, "scoring_ms": 718.894181, "total_ms": 6803.767975999999, "rounds": 2, "per_decision_ms": 2267.9226586666664}
+ warm usage {"prompt_tokens": 291, "cached_tokens": 116, "context_tokens": 175, "scored_rows": 60, "media_chunks": 2, "media_tokens": 128, "media_cached": 2} 
+ warm timings {"prefill_ms": 2434.851572, "media_encode_ms": 0.0, "scoring_ms": 884.163017, "total_ms": 3319.014589, "rounds": 2, "per_decision_ms": 1106.3381963333334}
+ tree == greedy decisions: True  warm == cold decisions: True

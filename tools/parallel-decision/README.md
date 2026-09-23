@@ -192,6 +192,71 @@ A schema-valid answer is not a correct answer. Every value comes with a probabil
 "abstain": {"min_probability": 0.8, "min_margin": 0.3}
 ```
 
+## Supported vision models
+
+Checked with `bench/equivalence.py` (image decision vs `/completion` on the same prompt), `bench/evaluate.py` and the
+tests. CPU build, 2026-09.
+
+| model | positions | checked | result |
+|---|---|---|---|
+| Qwen3-VL-2B-Instruct Q8_0 | M-RoPE (IMROPE) | equivalence, 1 and 2 images | max abs diff 5e-10 .. 3e-7 |
+| Qwen2.5-VL-3B-Instruct Q4_K_M | M-RoPE | equivalence, 1 and 2 images, negative control | 2e-5 .. 8e-4 on one image; a wrong post-image position gives 0.21 .. 0.27 |
+| SmolVLM-500M-Instruct Q8_0 | normal, image slices | accuracy, batch == single | bit-identical batch vs single; equivalence tool not usable (its tokenizer merges `{\n` with the next line) |
+| tinygemma3 (test model) | normal, non-causal image | tests (CI) | mechanics and errors; too small for tight numbers |
+
+Q4_K_M on CPU is sensitive to how a prompt is split into decode calls: the plain slot path already moves candidate
+probabilities by up to 0.027 when the same text prompt is decoded in two passes, so its equivalence numbers are noise,
+not errors. Split-stable models (Q8_0 above) match to 1e-7. Audio and video inputs are rejected.
+
+## Benchmarks
+
+CPU only (Ryzen 9 7940HS, 6 threads, no GPU backend), 256x256 images from `bench/shapes.py`, 4 fields
+(shape, color, count, dark background), `--decision-media-cache 0`. The machine was shared with other jobs (load
+average 20-40), so absolute times are noisy; the ratios are what matters. Raw data: `bench/results/`.
+
+| model | decision (median) | chat + json_schema (median) | field agreement | decision accuracy | chat accuracy |
+|---|---|---|---|---|---|
+| Qwen2.5-VL-3B Q4_K_M | 27.9 s | 128.7 s | 0.94 | 0.94 | 1.00 |
+| Qwen3-VL-2B Q8_0 | 4.4 s | 18.1 s | 1.00 | 1.00 | 1.00 |
+| SmolVLM-500M Q8_0 | 2.8 s | 3.4 s | 0.78 | 0.84 | 0.94 |
+
+Fields on one image (total / prefill / scoring):
+
+| model | 1 fields | 2 fields | 4 fields | 8 fields | 16 fields |
+|---|---|---|---|---|---|
+| Qwen2.5-VL-3B Q4_K_M | 21.5 / 18.0 / 3.5 s | 12.5 / 11.0 / 1.4 s | 12.3 / 11.5 / 0.8 s | 4.9 / 4.1 / 0.8 s | 6.4 / 4.7 / 1.7 s |
+| Qwen3-VL-2B Q8_0 | 2.5 / 2.2 / 0.3 s | 2.7 / 2.4 / 0.3 s | 2.6 / 2.2 / 0.4 s | 2.9 / 2.1 / 0.9 s | 3.9 / 2.3 / 1.6 s |
+| SmolVLM-500M Q8_0 | 2.2 / 2.1 / 0.0 s | 2.2 / 2.1 / 0.0 s | 2.2 / 2.1 / 0.1 s | 2.2 / 2.1 / 0.2 s | 2.7 / 2.4 / 0.3 s |
+
+N images: one request with N contexts vs N requests:
+
+| model | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| Qwen2.5-VL-3B Q4_K_M | 6.6 vs 5.0 | 9.0 vs 8.8 | 19.3 vs 18.3 | 88.3 vs 120.0 |
+| Qwen3-VL-2B Q8_0 | 4.4 vs 3.2 | 5.5 vs 26.0 | 103.4 vs 116.9 | 232.2 vs 206.4 |
+| SmolVLM-500M Q8_0 | 2.5 vs 2.3 | 4.4 vs 5.4 | 12.1 vs 11.8 | 21.6 vs 23.3 |
+
+| model | field | accuracy | mean confidence | ECE | fitted T | ECE at T |
+|---|---|---|---|---|---|---|
+| Qwen2.5-VL-3B Q4_K_M | shape | 1.00 | 1.00 | 0.002 | 0.05 | 0.000 |
+| Qwen2.5-VL-3B Q4_K_M | color | 1.00 | 0.99 | 0.007 | 0.05 | 0.000 |
+| Qwen2.5-VL-3B Q4_K_M | count | 1.00 | 0.99 | 0.009 | 0.05 | 0.000 |
+| Qwen2.5-VL-3B Q4_K_M | dark_background | 0.61 | 0.80 | 0.253 | 1.457 | 0.277 |
+| Qwen3-VL-2B Q8_0 | shape | 1.00 | 1.00 | 0.000 | 0.05 | 0.000 |
+| Qwen3-VL-2B Q8_0 | color | 1.00 | 1.00 | 0.000 | 0.05 | 0.000 |
+| Qwen3-VL-2B Q8_0 | count | 0.94 | 0.99 | 0.055 | 2.029 | 0.058 |
+| Qwen3-VL-2B Q8_0 | dark_background | 0.94 | 0.99 | 0.049 | 1.745 | 0.040 |
+| SmolVLM-500M Q8_0 | shape | 0.86 | 0.87 | 0.082 | 1.078 | 0.060 |
+| SmolVLM-500M Q8_0 | color | 1.00 | 0.99 | 0.005 | 0.05 | 0.000 |
+| SmolVLM-500M Q8_0 | count | 0.94 | 0.96 | 0.033 | 1.078 | 0.040 |
+| SmolVLM-500M Q8_0 | dark_background | 0.47 | 0.89 | 0.416 | 20.0 | 0.059 |
+
+- A decision is 4x faster than a chat completion with a `json_schema` response on the Qwen models, and extra fields
+  are nearly free after the image prefill (Qwen3-VL: 1 field 2.5 s, 16 fields 3.9 s).
+- Schema-valid is not correct: SmolVLM answers `dark_background` at chance with 0.89 mean confidence. `evaluate.py`
+  shows it (ECE 0.42), and a fitted temperature or an abstain rule catches it.
+- A warm prefix and image cache halve a repeated request (Qwen3-VL, 2 images + 1 text: 6.8 s cold, 3.3 s warm).
+
 ## Checking a model
 
 `bench/equivalence.py` compares the probabilities of an image decision with the next-token distribution of

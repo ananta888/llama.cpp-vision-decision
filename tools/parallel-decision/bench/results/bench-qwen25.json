@@ -1,0 +1,74 @@
+{
+ "decision_vs_chat": {
+  "decision_ms_median": 27874.3,
+  "chat_json_schema_ms_median": 128725.2,
+  "field_agreement": 0.938,
+  "decision_accuracy": 0.938,
+  "chat_accuracy": 1.0
+ },
+ "fields_scaling": [
+  {
+   "fields": 1,
+   "total_ms": 21471.1,
+   "prefill_ms": 17997.8,
+   "scoring_ms": 3462.3,
+   "scored_rows": 5
+  },
+  {
+   "fields": 2,
+   "total_ms": 12454.4,
+   "prefill_ms": 11048.5,
+   "scoring_ms": 1400.0,
+   "scored_rows": 10
+  },
+  {
+   "fields": 4,
+   "total_ms": 12258.7,
+   "prefill_ms": 11488.8,
+   "scoring_ms": 759.4,
+   "scored_rows": 20
+  },
+  {
+   "fields": 8,
+   "total_ms": 4896.2,
+   "prefill_ms": 4077.3,
+   "scoring_ms": 812.7,
+   "scored_rows": 40
+  },
+  {
+   "fields": 16,
+   "total_ms": 6444.9,
+   "prefill_ms": 4709.2,
+   "scoring_ms": 1726.4,
+   "scored_rows": 81
+  }
+ ],
+ "multi_context": [
+  {
+   "images": 1,
+   "one_request_ms": 6555.8,
+   "separate_requests_ms": 4985.8
+  },
+  {
+   "images": 2,
+   "one_request_ms": 8969.6,
+   "separate_requests_ms": 8826.2
+  },
+  {
+   "images": 4,
+   "one_request_ms": 19337.0,
+   "separate_requests_ms": 18291.4
+  },
+  {
+   "images": 8,
+   "one_request_ms": 88317.5,
+   "separate_requests_ms": 120014.3
+  }
+ ],
+ "cache": {
+  "cold_ms": 19097.6,
+  "warm_ms": 16403.0,
+  "cached_tokens_warm": 116,
+  "media_encode_ms": 5737.4
+ }
+}

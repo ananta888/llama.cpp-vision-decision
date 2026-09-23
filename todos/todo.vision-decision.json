@@ -6,7 +6,7 @@
   "owner": "Peter Stuiber / Ananta",
   "track": "llama_cpp_vision_decision",
   "title": "llama.cpp vision-decision: direkte multimodale Schema-Entscheidungen ueber /v1/decision",
-  "status": "partial",
+  "status": "done",
   "priority": "P0",
   "status_scale": [
     "todo",
@@ -71,7 +71,7 @@
         "VD-021",
         "VD-022"
       ],
-      "status": "partial"
+      "status": "done"
     },
     {
       "id": "VD-M3",
@@ -87,7 +87,7 @@
         "VD-037",
         "VD-038"
       ],
-      "status": "partial"
+      "status": "done"
     },
     {
       "id": "VD-M4",
@@ -100,7 +100,7 @@
         "VD-044",
         "VD-050"
       ],
-      "status": "todo"
+      "status": "done"
     }
   ],
   "tasks": [
@@ -264,13 +264,13 @@
       "milestone_id": "VD-M2",
       "title": "Server: multimodaler Prefill ueber libmtmd in die Trunk-Sequenz",
       "type": "feature",
-      "status": "partial",
+      "status": "done",
       "priority": "P0",
       "risk": "high",
       "depends_on": [
         "VD-020"
       ],
-      "progress_percent": 90,
+      "progress_percent": 100,
       "implementation": [
         "Gerenderten Tail per mtmd_tokenize in Chunks zerlegen (add_special nur ohne Shared-Prefix).",
         "Text-Chunks dekodieren, Medien-Chunks per mtmd_encode/mtmd_batch encodieren und mit mtmd_helper_decode_image_chunk auf die Trunk-Sequenz dekodieren.",
@@ -281,9 +281,10 @@
         "Normaler multimodaler Chat (test_vision_api.py) bleibt gruen."
       ],
       "evidence": [
-        "unit/test_decision.py::test_decision_vision_matches_completion"
+        "unit/test_decision.py::test_decision_vision_matches_completion",
+        "final: 42 passed in 111s"
       ],
-      "implementation_note": "Prefill ueber mtmd_tokenize + mtmd_helper_eval_chunk_single (Text) + eigenes mtmd_batch + mtmd_helper_decode_image_chunk (Medien); pos_next aus n_pos. Nicht-kausale Medien: ub-Pruefung + max_group=1 (Upstream-Layoutabhaengigkeit, AGENT.md). Offen: Upstream-Vision-Tests nach finalem Stand erneut."
+      "implementation_note": "Finaler Lauf: test_vision_api + test_basic + test_decision = 42 passed auf Endstand."
     },
     {
       "id": "VD-022",
@@ -340,13 +341,13 @@
       "milestone_id": "VD-M3",
       "title": "Multi-Context-Batching mit Bildern",
       "type": "feature",
-      "status": "partial",
+      "status": "done",
       "priority": "P1",
       "risk": "high",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 90,
+      "progress_percent": 100,
       "implementation": [
         "Mehrere multimodale Kontexte in einem Request; Bild-Encodes kontextuebergreifend ueber mtmd_batch buendeln, wo das Modell es erlaubt.",
         "Ergebnisreihenfolge bleibt erhalten."
@@ -357,9 +358,10 @@
       ],
       "evidence": [
         "unit/test_decision.py::test_decision_vision_batch_and_modes",
-        "SmolVLM batch(4) vs single max |dp| 0.00e+00"
+        "SmolVLM batch(4) vs single max |dp| 0.00e+00",
+        "bench/results/bench-*.json"
       ],
-      "implementation_note": "Multi-Context: Batch == Einzel bitgenau fuer SmolVLM (4 Bilder), tinygemma3 (gemischt); max. ein Bild-Kontext pro Gruppe, Text-Kontexte weiter gebuendelt; Encode-Batching ueber mtmd_batch. Offen: Timing aus bench.py."
+      "implementation_note": "Batch == Einzel bitgenau; Qwen3-VL 2 Bild- + 1 Text-Kontext in einem Request; Timings in bench/results (Mehrfach-Kontext vs Einzel-Requests, CPU mit Fremdlast)."
     },
     {
       "id": "VD-032",
@@ -415,13 +417,13 @@
       "milestone_id": "VD-M3",
       "title": "Weitere VLMs und Positionstypen",
       "type": "test",
-      "status": "partial",
+      "status": "done",
       "priority": "P1",
       "risk": "high",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 90,
+      "progress_percent": 100,
       "implementation": [
         "Gemma 3 (nicht-kausale Bildattention, normale Positionen), SmolVLM (idefics3), Qwen3-VL (IMROPE) pruefen.",
         "Kompatibilitaetsmatrix mit Belegen erstellen; nicht unterstuetzte Typen (z. B. HunyuanVL, Audio) konkret begruenden."
@@ -430,42 +432,46 @@
         "Mindestens 3 VLM-Familien mit Aequivalenztest belegt.",
         "Matrix in README mit Modell, Quant, Positionstyp, Status."
       ],
-      "evidence": [],
-      "implementation_note": "Matrix: Qwen2.5-VL-3B (M-RoPE, Negativkontrolle), Qwen3-VL-2B (IMROPE, 1e-9..3e-7), SmolVLM-500M (idefics3, Slices; /completion-Vergleich wegen Tokenizer-Naht nicht moeglich -> Evaluate 86-100% auf 3 von 4 Feldern + Batch==Einzel), tinygemma3 (Gemma3, nicht-kausal). Nicht getestet: HunyuanVL (eigenes Layout, Code-Pfad ueber mtmd generisch), Audio (bewusst abgewiesen). Offen: Tabelle im README."
+      "evidence": [
+        "tools/parallel-decision/README.md#supported-vision-models"
+      ],
+      "implementation_note": "Matrix im README: Qwen3-VL-2B, Qwen2.5-VL-3B, SmolVLM-500M, tinygemma3 mit Belegen und Grenzen."
     },
     {
       "id": "VD-035",
       "milestone_id": "VD-M3",
       "title": "Tree- und Greedy-Decisions mit Vision",
       "type": "test",
-      "status": "partial",
+      "status": "done",
       "priority": "P1",
       "risk": "medium",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 50,
+      "progress_percent": 100,
       "implementation": [
         "Beide Modi auf multimodalen Trunks testen; grosse Felder (>tree_max) greedy."
       ],
       "acceptance_criteria": [
         "Tree und Greedy liefern bei eindeutigen Feldern denselben Gewinner; Test vorhanden."
       ],
-      "evidence": [],
-      "implementation_note": "Greedy und Tree auf Bild-Trunk laufen; Test prueft gleichen Gewinner. Offen: M-RoPE-Modell."
+      "evidence": [
+        "bench/results/dod-qwen3.txt"
+      ],
+      "implementation_note": "Tree == Greedy bei allen Entscheidungen im DoD-Lauf (Qwen3-VL, 3 Kontexte x 4 Felder) und im CI-Test."
     },
     {
       "id": "VD-036",
       "milestone_id": "VD-M3",
       "title": "Kalibrierung und Unsicherheitsmasse",
       "type": "feature",
-      "status": "partial",
+      "status": "done",
       "priority": "P2",
       "risk": "medium",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 80,
+      "progress_percent": 100,
       "implementation": [
         "Pro Feld Temperatur-Skalierung der Logits als Option; margin und entropy im Ergebnis.",
         "Skript, das Temperatur auf gelabelten Daten fittet und ECE meldet."
@@ -476,9 +482,10 @@
       ],
       "evidence": [
         "unit/test_decision.py::test_decision_calibration_and_abstain",
-        "bench/evaluate.py"
+        "bench/evaluate.py",
+        "bench/results/eval-*.json"
       ],
-      "implementation_note": "Temperatur (Pfad-Ebene p^(1/T), greedy pro Schritt), margin/entropy, return_probs; evaluate.py fittet T pro Feld (NLL) und meldet ECE. Offen: Lauf auf Qwen dokumentieren."
+      "implementation_note": "evaluate.py auf Qwen2.5-VL, Qwen3-VL, SmolVLM ausgefuehrt: Accuracy/ECE/T* pro Feld im README; zeigt uebersichere Felder (SmolVLM dark_background ECE 0.42)."
     },
     {
       "id": "VD-037",
@@ -538,7 +545,7 @@
       "milestone_id": "VD-M4",
       "title": "Benchmarks",
       "type": "benchmark",
-      "status": "todo",
+      "status": "done",
       "priority": "P1",
       "risk": "medium",
       "depends_on": [
@@ -546,7 +553,7 @@
         "VD-031",
         "VD-033"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "Vision-Decision vs Chat-Completion mit json_schema auf gleichem Bild/Schema (Latenz, Uebereinstimmung).",
         "Skalierung ueber Anzahl Felder (1..16) auf einem Bild; Multi-Context; warm vs kalt."
@@ -554,7 +561,10 @@
       "acceptance_criteria": [
         "Skripte in tools/parallel-decision/bench/, Ergebnisse mit Hardware/Modell/Befehl im README."
       ],
-      "evidence": []
+      "evidence": [
+        "bench/results/bench-*.json"
+      ],
+      "implementation_note": "bench.py auf 3 VLMs: Decision vs Chat json_schema (4x schneller auf Qwen), Feld-Skalierung, Multi-Kontext, Cache warm/kalt; README mit Hardware und Lasthinweis."
     },
     {
       "id": "VD-041",
@@ -609,20 +619,23 @@
       "milestone_id": "VD-M4",
       "title": "Dokumentation",
       "type": "documentation",
-      "status": "todo",
+      "status": "done",
       "priority": "P0",
       "risk": "low",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "README von parallel-decision: Vision-API, Beispiele, Limits, Modellmatrix, Benchmarks, Abstain/Kalibrierung, Grenzen (kein OCR/Freitext)."
       ],
       "acceptance_criteria": [
         "Alle Request-Felder und Antwortfelder dokumentiert; Beispiele sind echte Antworten."
       ],
-      "evidence": []
+      "evidence": [
+        "tools/parallel-decision/README.md"
+      ],
+      "implementation_note": "README: Bilder-API, Optionen, Kalibrierung/Abstain, Limits, Modellmatrix, Benchmarks, Pruefwerkzeug, Playground; AGENT.md mit verifizierten Fakten und Upstream-Befund."
     },
     {
       "id": "VD-044",
@@ -652,7 +665,7 @@
       "milestone_id": "VD-M4",
       "title": "DoD-Nachweis",
       "type": "test",
-      "status": "todo",
+      "status": "done",
       "priority": "P0",
       "risk": "medium",
       "depends_on": [
@@ -663,14 +676,18 @@
         "VD-041",
         "VD-043"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "Abschlusslauf: Bild direkt ueber llama-server, mehrere Felder aus einem multimodalen KV-Kontext, Probability/Timing, Batching/Caching, Tests, Benchmarks, Doku."
       ],
       "acceptance_criteria": [
         "Evidenz (Befehle, Antworten, Testlauf) in dieser Todo verlinkt."
       ],
-      "evidence": []
+      "evidence": [
+        "bench/results/dod-qwen3.txt",
+        "final_tests: 42 passed"
+      ],
+      "implementation_note": "Qwen3-VL-2B ueber llama-server: 2 Bilder direkt + 1 Text in einem Request, je 4 typisierte Felder aus einem multimodalen KV-Kontext, alle Bildantworten korrekt, Probability + Timings, Cache warm 6.8s -> 3.3s, Tree == Greedy; 42 Tests gruen; Benchmarks und Doku vorhanden."
     }
   ],
   "critical_path_tasks": [
@@ -684,13 +701,13 @@
   "tasks_status_summary": {
     "total": 23,
     "by_status": {
-      "todo": 3,
+      "todo": 0,
       "in_progress": 0,
-      "partial": 5,
+      "partial": 0,
       "blocked": 0,
-      "done": 15
+      "done": 23
     },
-    "progress_percent_done": 65.2,
+    "progress_percent_done": 100.0,
     "by_priority": {
       "P0": 12,
       "P1": 8,
@@ -705,16 +722,16 @@
     },
     "critical_path": {
       "total": 6,
-      "done": 4,
-      "remaining": 2
+      "done": 6,
+      "remaining": 0
     },
     "milestones": {
       "total": 5,
-      "todo": 1,
+      "todo": 0,
       "in_progress": 0,
-      "partial": 2,
+      "partial": 0,
       "blocked": 0,
-      "done": 2
+      "done": 5
     }
   },
   "log": [
@@ -891,6 +908,54 @@
       "task": "VD-044",
       "progress": "100",
       "note": "playground/index.html: statisch, ohne Abhaengigkeiten; mit headless Chromium gegen SmolVLM getestet (4 Felder, Balken, Abstain, Timings, keine JS-Fehler, mobil ohne Horizontal-Scroll)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-021",
+      "progress": "100",
+      "note": "Finaler Lauf: test_vision_api + test_basic + test_decision = 42 passed auf Endstand."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-031",
+      "progress": "100",
+      "note": "Batch == Einzel bitgenau; Qwen3-VL 2 Bild- + 1 Text-Kontext in einem Request; Timings in bench/results (Mehrfach-Kontext vs Einzel-Requests, CPU mit Fremdlast)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-034",
+      "progress": "100",
+      "note": "Matrix im README: Qwen3-VL-2B, Qwen2.5-VL-3B, SmolVLM-500M, tinygemma3 mit Belegen und Grenzen."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-035",
+      "progress": "100",
+      "note": "Tree == Greedy bei allen Entscheidungen im DoD-Lauf (Qwen3-VL, 3 Kontexte x 4 Felder) und im CI-Test."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-036",
+      "progress": "100",
+      "note": "evaluate.py auf Qwen2.5-VL, Qwen3-VL, SmolVLM ausgefuehrt: Accuracy/ECE/T* pro Feld im README; zeigt uebersichere Felder (SmolVLM dark_background ECE 0.42)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-040",
+      "progress": "100",
+      "note": "bench.py auf 3 VLMs: Decision vs Chat json_schema (4x schneller auf Qwen), Feld-Skalierung, Multi-Kontext, Cache warm/kalt; README mit Hardware und Lasthinweis."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-043",
+      "progress": "100",
+      "note": "README: Bilder-API, Optionen, Kalibrierung/Abstain, Limits, Modellmatrix, Benchmarks, Pruefwerkzeug, Playground; AGENT.md mit verifizierten Fakten und Upstream-Befund."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-050",
+      "progress": "100",
+      "note": "Qwen3-VL-2B ueber llama-server: 2 Bilder direkt + 1 Text in einem Request, je 4 typisierte Felder aus einem multimodalen KV-Kontext, alle Bildantworten korrekt, Probability + Timings, Cache warm 6.8s -> 3.3s, Tree == Greedy; 42 Tests gruen; Benchmarks und Doku vorhanden."
     }
   ],
   "tasks_type_summary": {
@@ -898,18 +963,18 @@
     "by_type": {
       "documentation": {
         "total": 2,
-        "done": 1,
+        "done": 2,
         "partial": 0,
         "blocked": 0,
-        "todo": 1,
+        "todo": 0,
         "in_progress": 0,
-        "progress_percent": 50.0,
+        "progress_percent": 100.0,
         "by_status": {
-          "todo": 1,
+          "todo": 0,
           "in_progress": 0,
           "partial": 0,
           "blocked": 0,
-          "done": 1
+          "done": 2
         }
       },
       "research": {
@@ -930,34 +995,34 @@
       },
       "test": {
         "total": 7,
-        "done": 4,
-        "partial": 2,
+        "done": 7,
+        "partial": 0,
         "blocked": 0,
-        "todo": 1,
+        "todo": 0,
         "in_progress": 0,
-        "progress_percent": 77.1,
+        "progress_percent": 100.0,
         "by_status": {
-          "todo": 1,
+          "todo": 0,
           "in_progress": 0,
-          "partial": 2,
+          "partial": 0,
           "blocked": 0,
-          "done": 4
+          "done": 7
         }
       },
       "feature": {
         "total": 9,
-        "done": 6,
-        "partial": 3,
+        "done": 9,
+        "partial": 0,
         "blocked": 0,
         "todo": 0,
         "in_progress": 0,
-        "progress_percent": 95.6,
+        "progress_percent": 100.0,
         "by_status": {
           "todo": 0,
           "in_progress": 0,
-          "partial": 3,
+          "partial": 0,
           "blocked": 0,
-          "done": 6
+          "done": 9
         }
       },
       "performance": {
@@ -994,18 +1059,18 @@
       },
       "benchmark": {
         "total": 1,
-        "done": 0,
+        "done": 1,
         "partial": 0,
         "blocked": 0,
-        "todo": 1,
+        "todo": 0,
         "in_progress": 0,
-        "progress_percent": 0.0,
+        "progress_percent": 100.0,
         "by_status": {
-          "todo": 1,
+          "todo": 0,
           "in_progress": 0,
           "partial": 0,
           "blocked": 0,
-          "done": 0
+          "done": 1
         }
       },
       "infrastructure": {
@@ -1027,13 +1092,13 @@
     }
   },
   "progress_summary": {
-    "state": "partial",
-    "todo_remaining": 3,
+    "state": "done",
+    "todo_remaining": 0,
     "in_progress": 0,
-    "partial": 5,
+    "partial": 0,
     "blocked": 0,
-    "done": 15,
-    "milestones_done": 2,
+    "done": 23,
+    "milestones_done": 5,
     "milestones_total": 5
   }
 }
