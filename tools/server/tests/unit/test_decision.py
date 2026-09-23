@@ -248,3 +248,17 @@ def test_decision_media_cache_and_limit(cache_mib):
     res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": [image_context([0, 1]), image_context([0, 1])]})
     assert res.status_code == 400
     assert "--decision-max-media" in res.body["error"]["message"]
+
+
+def test_decision_playground_page():
+    global server
+    server.api_key = "secret"
+    server.start()
+    res = requests.get(f"http://{server.server_host}:{server.server_port}/decision-playground")
+    assert res.status_code == 200
+    assert res.headers["Content-Type"].startswith("text/html")
+    assert "/v1/decision" in res.text
+    res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": ["x"]})
+    assert res.status_code == 401
+    res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": ["x"]}, headers={"Authorization": "Bearer secret"})
+    assert res.status_code == 200

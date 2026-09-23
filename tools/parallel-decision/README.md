@@ -283,5 +283,8 @@ line). Environment: `DECIDE_TREE`, `DECIDE_TREE_MAX`, `DECIDE_NSEQ`, `DECIDE_SPL
 straight to your llama-server, runs a decision and the same question as a chat completion side by side with live
 timers, and has a small game whose agents decide through the endpoint.
 
-`playground/index.html` is a single static page for image decisions: pick images, edit the schema, and see every
-value's probability, margin and the timings. Open it in a browser and point it at the server (CORS is open by default).
+`llama-server` serves a playground for image decisions at `/decision-playground` (source:
+`playground/index.html`, built into the server): pick images, edit the schema, and see every value's probability,
+margin, abstain marks and the timings. The page itself is public like the web UI; with `--api-key`, enter the key in
+the page, since `/v1/decision` still checks it. The file also works on its own, opened in a browser and pointed at a
+server (CORS is open by default).

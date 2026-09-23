@@ -1,4 +1,5 @@
 #include "server-context.h"
+#include "decision-playground.h"
 #include "server-http.h"
 #include "server-models.h"
 #include "server-cors-proxy.h"
@@ -279,6 +280,12 @@ int llama_server(common_params & params, int argc, char ** argv) {
     ctx_http.post("/v1/reranking",             ex_wrapper(routes.post_rerank));
     ctx_http.post("/decision",                 ex_wrapper(routes.post_decision));
     ctx_http.post("/v1/decision",              ex_wrapper(routes.post_decision));
+    ctx_http.get ("/decision-playground",      ex_wrapper([](const server_http_req &) {
+        auto res = std::make_unique<server_http_res>();
+        res->content_type = "text/html; charset=utf-8";
+        res->data         = decision_playground_html;
+        return res;
+    }));
     ctx_http.post("/tokenize",                 ex_wrapper(routes.post_tokenize));
     ctx_http.post("/detokenize",               ex_wrapper(routes.post_detokenize));
     ctx_http.post("/apply-template",           ex_wrapper(routes.post_apply_template));
