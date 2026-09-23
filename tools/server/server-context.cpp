@@ -27,6 +27,9 @@
 #include <random>
 #include <utility>
 #include <fstream>
+#include <list>
+#include <map>
+#include <unordered_map>
 
 // fix problem with std::min and std::max
 #if defined(_WIN32)
@@ -868,15 +871,60 @@ static std::string decision_context_text(const json & c, const server_chat_param
     return text;
 }
 
+// Encoded /decision media kept across requests, keyed by image id and slice; least recently used goes first.
+struct decision_media_cache {
+    size_t max_bytes = 0;
+    size_t bytes     = 0;
+    std::list<std::pair<std::string, std::vector<float>>> lru;
+    std::unordered_map<std::string, std::list<std::pair<std::string, std::vector<float>>>::iterator> index;
+
+    float * get(const std::string & key) {
+        auto it = index.find(key);
+        if (it == index.end()) {
+            return nullptr;
+        }
+        lru.splice(lru.begin(), lru, it->second);
+        return it->second->second.data();
+    }
+
+    void put(const std::string & key, const float * data, size_t n) {
+        const size_t size = n * sizeof(float);
+        if (key.empty() || size > max_bytes || index.count(key)) {
+            return;
+        }
+        while (bytes + size > max_bytes) {
+            bytes -= lru.back().second.size() * sizeof(float);
+            index.erase(lru.back().first);
+            lru.pop_back();
+        }
+        lru.emplace_front(key, std::vector<float>(data, data + n));
+        index[key] = lru.begin();
+        bytes += size;
+    }
+};
+
 // Encodes the media chunks of one /decision request in request order, several per mtmd batch when the
 // projector allows it. Uses its own mtmd batch, so slots that hold encoded media are not touched.
 struct decision_media_encoder {
-    mtmd_context * mctx;
+    mtmd_context * mctx = nullptr;
+    decision_media_cache * cache = nullptr;
+    size_t n_embd = 0;
     std::vector<const mtmd_input_chunk *> media;
+    std::unordered_map<const mtmd_input_chunk *, std::string> keys; // cache key per media chunk, may be empty
     mtmd::batch_ptr batch;
     double encode_ms = 0;
+    int    n_cached  = 0;
+
+    float * cached(const mtmd_input_chunk * chunk) {
+        const std::string & key = keys[chunk];
+        return cache && !key.empty() ? cache->get(key) : nullptr;
+    }
 
     float * get(const mtmd_input_chunk * chunk) {
+        if (float * embd = cached(chunk)) {
+            n_cached++;
+            return embd;
+        }
         if (batch) {
             if (float * embd = mtmd_batch_get_output_embd(batch.get(), chunk)) {
                 return embd;
@@ -885,8 +933,15 @@ struct decision_media_encoder {
         auto it = std::find(media.begin(), media.end(), chunk);
         GGML_ASSERT(it != media.end());
         batch.reset(mtmd_batch_init(mctx));
-        while (it != media.end() && mtmd_batch_add_chunk(batch.get(), *it) == 0) {
-            ++it;
+        std::vector<const mtmd_input_chunk *> added;
+        for (; it != media.end(); ++it) {
+            if (*it != chunk && cached(*it)) {
+                continue;
+            }
+            if (mtmd_batch_add_chunk(batch.get(), *it) != 0) {
+                break;
+            }
+            added.push_back(*it);
         }
         const int64_t t0 = ggml_time_us();
         if (mtmd_batch_encode(batch.get()) != 0) {
@@ -894,6 +949,11 @@ struct decision_media_encoder {
             throw std::runtime_error("failed to encode the decision media");
         }
         encode_ms += (ggml_time_us() - t0) / 1000.0;
+        if (cache) {
+            for (const auto * c : added) {
+                cache->put(keys[c], mtmd_batch_get_output_embd(batch.get(), c), mtmd_input_chunk_get_n_tokens(c) * n_embd);
+            }
+        }
         return mtmd_batch_get_output_embd(batch.get(), chunk);
     }
 };
@@ -945,6 +1005,7 @@ public:
     // note: chat_params must not be refreshed upon existing sleeping state
     server_chat_params chat_params;
     std::unique_ptr<llama_decision::engine> decision_engine; // created by the first /decision request
+    decision_media_cache decision_media;
 
     server_state_callback_t callback_state = [](server_state, json) -> void {};
 
@@ -2478,6 +2539,18 @@ private:
         if (!body.contains("contexts") || !body.at("contexts").is_array() || body.at("contexts").empty() || body.at("contexts").size() > 256) {
             throw std::invalid_argument("\"contexts\" must be an array of 1-256 strings");
         }
+        int n_images = 0;
+        for (const auto & c : body.at("contexts")) {
+            if (c.is_array()) {
+                for (const auto & p : c) {
+                    n_images += json_value(p, "type", std::string()) == "image_url";
+                }
+            }
+        }
+        if (n_images > params_base.decision_max_media) {
+            throw std::invalid_argument(string_format("a decision request takes at most %d images (--decision-max-media), got %d",
+                                                      params_base.decision_max_media, n_images));
+        }
         std::vector<std::string> contexts;
         std::vector<std::vector<raw_buffer>> files(body.at("contexts").size());
         for (const auto & c : body.at("contexts")) {
@@ -2517,7 +2590,11 @@ private:
         opt.allow_cache = body.value("cache_prompt", true);
 
         // contexts with media are split into chunks by libmtmd and prefilled on their trunk by the engine
-        decision_media_encoder enc { mctx, {}, nullptr };
+        decision_media.max_bytes = (size_t) params_base.decision_media_cache * 1024 * 1024;
+        decision_media_encoder enc;
+        enc.mctx   = mctx;
+        enc.cache  = decision_media.max_bytes > 0 ? &decision_media : nullptr;
+        enc.n_embd = llama_model_n_embd_inp(model_tgt);
         std::vector<mtmd::input_chunks_ptr> media_chunks;
         std::vector<llama_decision::context_input> inputs(dynamic.size());
         size_t n_media_tokens = 0;
@@ -2546,6 +2623,7 @@ private:
             if (rc != 0) {
                 throw std::invalid_argument(rc == 1 ? "the number of images does not match the media markers" : "failed to preprocess a decision image");
             }
+            std::map<std::string, size_t> slices;
             for (size_t k = 0; k < mtmd_input_chunks_size(chunks.get()); ++k) {
                 const mtmd_input_chunk * chunk = mtmd_input_chunks_get(chunks.get(), k);
                 if (mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
@@ -2559,6 +2637,11 @@ private:
                                                                   n_img, n_img, llama_n_ubatch(ctx_tgt)));
                     }
                     non_causal = true;
+                }
+                // slices of one image share its id; the slice index keeps their keys apart
+                const char * id = mtmd_input_chunk_get_id(chunk);
+                if (id && id[0]) {
+                    enc.keys[chunk] = std::string(id) + "#" + std::to_string(slices[id]++);
                 }
                 enc.media.push_back(chunk);
                 n_media_tokens += n_img;
@@ -2590,6 +2673,7 @@ private:
         if (!enc.media.empty()) {
             usage["media_chunks"] = (long long) enc.media.size();
             usage["media_tokens"] = (long long) n_media_tokens;
+            usage["media_cached"] = enc.n_cached;
         }
         json timings = json::object();
         timings["prefill_ms"] = b.prefill_ms;

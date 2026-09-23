@@ -79,6 +79,8 @@ class ServerProcess:
     cache_prompt: bool | None = None
     n_slots: int | None = None
     decision_seqs: int | None = None
+    decision_media_cache: int | None = None
+    decision_max_media: int | None = None
     ctk: str | None = None
     ctv: str | None = None
     fa: str | None = None
@@ -221,6 +223,10 @@ class ServerProcess:
             server_args.extend(["--parallel", self.n_slots])
         if self.decision_seqs:
             server_args.extend(["--decision-seqs", self.decision_seqs])
+        if self.decision_media_cache is not None:
+            server_args.extend(["--decision-media-cache", self.decision_media_cache])
+        if self.decision_max_media:
+            server_args.extend(["--decision-max-media", self.decision_max_media])
         if self.ctk:
             server_args.extend(["-ctk", self.ctk])
         if self.ctv:

@@ -2557,6 +2557,26 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
                 params.n_seq_decision = value;
             }
         ).set_env("LLAMA_ARG_DECISION_SEQS").set_examples({LLAMA_EXAMPLE_SERVER}));
+        add_opt(common_arg(
+            {"--decision-media-cache"}, "N",
+            string_format("MiB of encoded /decision images kept across requests, 0 = off (default: %d)", params.decision_media_cache),
+            [](common_params & params, int value) {
+                if (value < 0) {
+                    throw std::invalid_argument("--decision-media-cache must not be negative");
+                }
+                params.decision_media_cache = value;
+            }
+        ).set_env("LLAMA_ARG_DECISION_MEDIA_CACHE").set_examples({LLAMA_EXAMPLE_SERVER}));
+        add_opt(common_arg(
+            {"--decision-max-media"}, "N",
+            string_format("most images in one /decision request (default: %d)", params.decision_max_media),
+            [](common_params & params, int value) {
+                if (value < 1) {
+                    throw std::invalid_argument("--decision-max-media must be at least 1");
+                }
+                params.decision_max_media = value;
+            }
+        ).set_env("LLAMA_ARG_DECISION_MAX_MEDIA").set_examples({LLAMA_EXAMPLE_SERVER}));
     } else {
         add_opt(common_arg(
             {"-np", "--parallel"}, "N",

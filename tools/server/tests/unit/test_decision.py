@@ -230,3 +230,21 @@ def test_decision_calibration_and_abstain():
     for bad in ({"temperature": 0}, {"temperature": "hot"}, {"abstain": {"min_probability": 2}}):
         res = server.make_request("POST", "/v1/decision", data=dict({"schema": SCHEMA, "contexts": ["x"]}, **bad))
         assert res.status_code == 400
+
+
+@pytest.mark.parametrize("cache_mib", [256, 0])
+def test_decision_media_cache_and_limit(cache_mib):
+    global server
+    server.decision_media_cache = cache_mib
+    server.decision_max_media = 3
+    server.start()
+    first = decide({"schema": SCHEMA, "contexts": [image_context([0])]})
+    again = decide({"schema": SCHEMA, "contexts": [image_context([0]), image_context([1]), image_context([1])]})
+    assert first["usage"]["media_cached"] == 0
+    # image 0 comes from the previous request, the second copy of image 1 from the first one
+    assert again["usage"]["media_cached"] == (2 if cache_mib else 0)
+    assert again["results"][0] == first["results"][0]
+    assert again["results"][1] == again["results"][2]
+    res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": [image_context([0, 1]), image_context([0, 1])]})
+    assert res.status_code == 400
+    assert "--decision-max-media" in res.body["error"]["message"]
