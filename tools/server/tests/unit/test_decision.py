@@ -125,7 +125,7 @@ def test_decision_vision_matches_completion(images):
     body = decide({"schema": {"label": SCHEMA["label"]}, "contexts": [parts], "mode": "tree", "cache_prompt": False})
     field = body["results"][0]["fields"]["label"]
     assert field["scored_nodes"] == 1
-    assert field["value"] == max(ref, key=ref.get)
+    assert field["value"] == max(ref, key=lambda key: ref[key])
     # the tiny model amplifies kernel differences between the two paths (text-only contexts differ by ~6e-3 too)
     assert abs(field["probability"] - ref[field["value"]]) < 5e-2
     assert body["usage"]["media_chunks"] == len(images)
