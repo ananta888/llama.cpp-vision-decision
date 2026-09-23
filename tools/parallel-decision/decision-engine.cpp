@@ -435,12 +435,16 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
     std::vector<llama_pos> pos_next(contexts.size());
 
     // each context in a group holds one trunk sequence; the rest of the pool scores branches
-    const size_t per_group = std::clamp<size_t>(n_pool / (1 + branches), 1, opt.max_group > 0 ? std::min(opt.max_group, contexts.size()) : contexts.size());
+    const size_t per_group = std::clamp<size_t>(n_pool / (1 + branches), 1, contexts.size());
+    // at most one prefilled (media) context per group, decoded first right after the prefix: media decoded
+    // after other trunks' cells give slightly different numbers, text does not
     auto group_size = [&](size_t g0) {
         size_t n = 1, used = shared.size() + ctx_tokens[g0];
-        while (g0 + n < contexts.size() && n < per_group &&
+        int n_prefill = contexts[g0].prefill ? 1 : 0;
+        while (g0 + n < contexts.size() && n < per_group && n_prefill + (contexts[g0 + n].prefill ? 1 : 0) <= 1 &&
                used + ctx_tokens[g0 + n] + std::min<size_t>(n_batch, (size_t) total * (n + 1)) <= n_kv) {
             used += ctx_tokens[g0 + n];
+            n_prefill += contexts[g0 + n].prefill ? 1 : 0;
             ++n;
         }
         return n;
@@ -462,7 +466,6 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
                 pos_next[g0 + i] = pos_ctx + (llama_pos) prefixes[g0 + i].size();
             }
         }
-        decode_parts(parts);
         for (size_t i = 0; i < n_group; ++i) {
             if (contexts[g0 + i].prefill) {
                 pos_next[g0 + i] = contexts[g0 + i].prefill(seq_pool + (llama_seq_id) i, pos_ctx);
@@ -471,6 +474,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
                 }
             }
         }
+        decode_parts(parts);
         llama_synchronize(ctx); // llama_decode is asynchronous: wait for the prefill so its time isn't billed to scoring
         out.prefill_ms += ms_since(tp);
 

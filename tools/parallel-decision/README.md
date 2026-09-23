@@ -111,6 +111,9 @@ Compact fields, or a JSON Schema object with `properties`:
 
 Numeric fields take `aggregate`: `mode` (default), `median` or `mean`.
 
+Every field also takes `temperature` and `abstain` (`x-temperature` / `x-abstain` in JSON Schema), see
+[Calibration and abstain](#calibration-and-abstain).
+
 ### Options
 
 | field | default | meaning |
@@ -119,6 +122,90 @@ Numeric fields take `aggregate`: `mode` (default), `median` or `mean`.
 | `mode` | `auto` | `tree` scores every divergence node and returns exact probabilities; `greedy` walks the trie; `auto` picks tree up to `tree_max` values |
 | `tree_max` | 128 | per-field switch between tree and greedy |
 | `cache_prompt` | true | reuse the cached instructions + schema prefix |
+| `temperature` | 1.0 | default temperature of every field |
+| `abstain` | none | default `{"min_probability": p, "min_margin": m}` of every field |
+| `return_probs` | false | list every allowed value of a tree field with its probability |
+
+Tree fields also return `margin` (top-1 minus top-2 probability) and `entropy` (nats) of their value distribution.
+
+## Images
+
+With a vision model (`--mmproj`), an entry of `contexts` can be an array of OpenAI-style content parts instead of a
+string: `{"type": "text", "text": ...}` and `{"type": "image_url", "image_url": {"url": ...}}`. The image goes through
+the same libmtmd path as chat images and is prefilled into the context's KV sequence; every field is then scored from
+that one multimodal context. No caption is generated in between.
+
+```bash
+IMG=$(base64 -w0 photo.png)
+curl http://localhost:8096/v1/decision -H "Content-Type: application/json" -d '{
+  "schema": {
+    "shape": {"type": "enum", "choices": ["circle","square","triangle"], "description": "Which shape is drawn?"},
+    "count": {"type": "integer", "minimum": 1, "maximum": 4, "description": "How many shapes are there?"},
+    "dark_background": {"type": "boolean", "description": "Is the background dark?"}
+  },
+  "contexts": [[
+    {"type": "image_url", "image_url": {"url": "data:image/png;base64,'$IMG'"}},
+    {"type": "text", "text": "Answer the questions about this picture."}
+  ]]
+}'
+```
+
+- Image urls are loaded like chat images: `data:` URIs, raw base64, `http(s)://` (10 MB, 10 s) and `file://` only
+  below `--media-path`.
+- Several images per context and several image contexts per request work. Text and image contexts can be mixed.
+- `usage` adds `media_chunks`, `media_tokens` and `media_cached`; `timings` adds `media_encode_ms` (part of
+  `prefill_ms`).
+- Positions follow the model: Qwen-VL style models (M-RoPE) give an image fewer positions than tokens, and the fields
+  are scored after the image's real position.
+- Images are encoded in the request's own mtmd batch, several at a time when the projector supports it.
+- Models that attend to image tokens non-causally (Gemma 3, larger Gemma 4, DeepSeek 4 V) need the whole image in one
+  ubatch (`-ub`).
+- Each group of contexts in flight holds at most one image context, decoded right after the cached prefix: image
+  embeddings decoded behind other sequences' KV cells give slightly different numbers (reproducible on the plain slot
+  path), while text does not. So a decision does not depend on the other contexts of its request; text contexts are
+  still batched around it.
+- The runner only chooses among the finite allowed values. It does not read free text out of an image (OCR); use a
+  chat completion for that.
+
+Server options for images:
+
+| option | default | meaning |
+|---|---|---|
+| `--decision-max-media N` | 16 | most images in one request; checked before any image is loaded |
+| `--decision-media-cache N` | 256 | MiB of encoded images kept across requests (key: image hash and slice); 0 = off |
+
+A context that cannot fit the KV cache next to the cached instructions is rejected with HTTP 400 before any decode.
+Contexts in flight are grouped so that they fit together.
+
+## Calibration and abstain
+
+A schema-valid answer is not a correct answer. Every value comes with a probability, and two knobs help to act on it:
+
+- `temperature` rescales a tree field's value distribution as `p(value)^(1/T)`, renormalised (greedy fields scale each
+  step). Fit it on labelled data with `bench/evaluate.py`, which reports accuracy, NLL and ECE per field and the
+  temperature that minimises NLL.
+- `abstain` marks a field as uncertain when its probability is below `min_probability` or its margin below
+  `min_margin`. The field keeps its most likely value, gets `"abstain": true`, and the result lists it in `abstained`,
+  so the caller can fall back (ask a larger model, a human, or a chat completion).
+
+```json
+"abstain": {"min_probability": 0.8, "min_margin": 0.3}
+```
+
+## Checking a model
+
+`bench/equivalence.py` compares the probabilities of an image decision with the next-token distribution of
+`/completion` on the same prompt (the slot path). A mismatch points at wrong positions or KV contents. Run the server
+with `LLAMA_MEDIA_MARKER="<__media__>"`:
+
+```bash
+python3 bench/shapes.py /tmp/shapes -n 64
+python3 bench/equivalence.py --url http://127.0.0.1:8096 --image /tmp/shapes/0003.png \
+    --choices red,green,blue,yellow --description "What colour are the shapes?"
+```
+
+`bench/evaluate.py DIR` measures accuracy and calibration on the images of `shapes.py`, and `bench/bench.py DIR`
+measures latency.
 
 ## CLI
 
@@ -130,3 +217,6 @@ line). Environment: `DECIDE_TREE`, `DECIDE_TREE_MAX`, `DECIDE_NSEQ`, `DECIDE_SPL
 [decision-playground](https://github.com/thecodacus/decision-playground) is a browser-only playground: it talks
 straight to your llama-server, runs a decision and the same question as a chat completion side by side with live
 timers, and has a small game whose agents decide through the endpoint.
+
+`playground/index.html` is a single static page for image decisions: pick images, edit the schema, and see every
+value's probability, margin and the timings. Open it in a browser and point it at the server (CORS is open by default).

@@ -54,10 +54,10 @@ ggml-org/llama.cpp (master)           remote: upstream-main       (fetch only)
 | server image batching | `mtmd_batch_add_chunk` / `mtmd_batch_encode` encode several images at once, then `mtmd_helper_decode_image_chunk` decodes each | `server-context.cpp`, `process_mtmd_chunk` |
 | mtmd buffers | an `mtmd_batch` owns its output embeddings; `mtmd_encode_chunk` writes `ctx->out_embd`; a decision batch does not touch slot batches | `tools/mtmd/mtmd.cpp` |
 | slice ids | all slices of one image share the bitmap id (`split_batch_to_chunk`), so a cache key needs the slice index too | `tools/mtmd/mtmd.cpp` |
-| non-causal layout | a non-causal image decode (Gemma 3) gives different numbers when the sequence's cells are split by cells of other sequences; causal decodes are layout-invariant. Upstream, see below | slot-path repro |
-| engine vs slot numerics | tinygemma3 on CPU: the text-only engine already differs from `/completion` by up to ~6e-3 on the same prompt, FA on/off by ~4e-2; tight equivalence checks need a real model | `unit/test_decision.py` |
+| media layout | decoding image embeddings into a sequence whose cells are split by other sequences' cells gives different numbers (Gemma 3 non-causal on the slot path, SmolVLM causal in the engine); text tokens over the same gap are bit-identical. The engine keeps one media context per group, decoded first | slot-path repro, `bench/` checks |
+| engine vs slot numerics | CPU build: results depend on how a prompt is split into decode calls. tinygemma3: text engine vs `/completion` up to ~6e-3, FA on/off ~4e-2. Qwen2.5-VL-3B Q4_K_M: the plain slot path moves candidate probabilities by up to 0.027 when one text prompt is decoded in two passes. Qwen3-VL-2B Q8_0 is split-stable (engine vs slot 1e-9). Exact equivalence checks need a split-stable model | `bench/equivalence.py` |
 
-### Upstream finding: non-causal image decode depends on the KV cell layout
+### Upstream finding: image decode depends on the KV cell layout
 
 Reproduced with plain `/completion` slots, no decision code: `llama-server -hf ggml-org/tinygemma3-GGUF:Q8_0 -np 2 --kv-unified --no-cache-idle-slots --cache-ram 0 -fa off -ctk f32 -ctv f32`.
 
@@ -65,7 +65,7 @@ Reproduced with plain `/completion` slots, no decision code: `llama-server -hf g
 2. slot 0: any long text prompt (`cache_prompt: true`), which puts its cells after slot 1's;
 3. slot 1: the full multimodal prompt (`cache_prompt: true`): the text is reused, the image lands behind slot 0's cells.
 
-The next-token logprobs differ from a fresh run by ~1e-2 (f32 KV, no FA). Without step 2 they are bit-identical, and a text-only continuation over the same gap is bit-identical too. `/decision` avoids this by deciding contexts with non-causal media one at a time (`options::max_group = 1`). Report upstream only through a human-written issue.
+The next-token logprobs differ from a fresh run by ~1e-2 (f32 KV, no FA). Without step 2 they are bit-identical, and a text-only continuation over the same gap is bit-identical too. The engine shows the same for the causal SmolVLM, so it is not limited to non-causal attention. `/decision` keeps at most one media context per group and decodes it right after the prefix. Report upstream only through a human-written issue.
 
 ## Architecture of the change
 

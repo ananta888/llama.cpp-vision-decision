@@ -2598,7 +2598,6 @@ private:
         std::vector<mtmd::input_chunks_ptr> media_chunks;
         std::vector<llama_decision::context_input> inputs(dynamic.size());
         size_t n_media_tokens = 0;
-        bool   non_causal     = false;
         for (size_t i = 0; i < dynamic.size(); ++i) {
             if (files[i].empty()) {
                 inputs[i].text = dynamic[i];
@@ -2630,13 +2629,10 @@ private:
                     continue;
                 }
                 const size_t n_img = mtmd_input_chunk_get_n_tokens(chunk);
-                if (mtmd_decode_use_non_causal(mctx, chunk)) {
-                    // non-causal image attention needs the whole image in one ubatch
-                    if (n_img > llama_n_ubatch(ctx_tgt)) {
-                        throw std::invalid_argument(string_format("an image of %zu tokens needs a physical batch size (-ub) of at least %zu for this model (current: %u)",
-                                                                  n_img, n_img, llama_n_ubatch(ctx_tgt)));
-                    }
-                    non_causal = true;
+                // non-causal image attention needs the whole image in one ubatch
+                if (mtmd_decode_use_non_causal(mctx, chunk) && n_img > llama_n_ubatch(ctx_tgt)) {
+                    throw std::invalid_argument(string_format("an image of %zu tokens needs a physical batch size (-ub) of at least %zu for this model (current: %u)",
+                                                              n_img, n_img, llama_n_ubatch(ctx_tgt)));
                 }
                 // slices of one image share its id; the slice index keeps their keys apart
                 const char * id = mtmd_input_chunk_get_id(chunk);
@@ -2654,11 +2650,6 @@ private:
             media_chunks.push_back(std::move(chunks));
         }
 
-        // a non-causal image decode depends on the KV cell layout of its sequence (also on the slot path):
-        // decide such contexts one at a time, so a result does not depend on the other contexts
-        if (non_causal) {
-            opt.max_group = 1;
-        }
         const auto b = decision_engine->decide_batch(shared, inputs, cs.inputs, opt);
 
         size_t context_tokens = 0;
