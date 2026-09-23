@@ -100,7 +100,7 @@
         "VD-044",
         "VD-050"
       ],
-      "status": "partial"
+      "status": "todo"
     }
   ],
   "tasks": [
@@ -316,21 +316,24 @@
       "milestone_id": "VD-M3",
       "title": "Multi-Image pro Kontext",
       "type": "feature",
-      "status": "partial",
+      "status": "done",
       "priority": "P1",
       "risk": "medium",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 70,
+      "progress_percent": 100,
       "implementation": [
         "Mehrere image_url Parts in einem Kontext; Reihenfolge von Text und Bildern bleibt erhalten."
       ],
       "acceptance_criteria": [
         "Test mit 2 Bildern in einem Kontext liefert korrekte Positionen (Aequivalenztest)."
       ],
-      "evidence": [],
-      "implementation_note": "Mehrere Bilder pro Kontext laufen (Aequivalenztest [0,1] auf tinygemma3). Offen: Beleg mit M-RoPE-Modell."
+      "evidence": [
+        "matrix: Qwen3-VL 2 imgs diff 3.16e-07",
+        "unit/test_decision.py::test_decision_vision_matches_completion[images2]"
+      ],
+      "implementation_note": "Mehrere Bilder pro Kontext: Qwen3-VL-2B Q8_0 Aequivalenz 3.2e-7 (2 Bilder, Frage zum zweiten), tinygemma3 im Test; Qwen2.5-VL Q4_K_M innerhalb seines Split-Rauschbodens (AGENT.md)."
     },
     {
       "id": "VD-031",
@@ -343,7 +346,7 @@
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 50,
+      "progress_percent": 90,
       "implementation": [
         "Mehrere multimodale Kontexte in einem Request; Bild-Encodes kontextuebergreifend ueber mtmd_batch buendeln, wo das Modell es erlaubt.",
         "Ergebnisreihenfolge bleibt erhalten."
@@ -353,9 +356,10 @@
         "Encode-Batching messbar (Timing) oder begruendet nicht moeglich."
       ],
       "evidence": [
-        "unit/test_decision.py::test_decision_vision_batch_and_modes"
+        "unit/test_decision.py::test_decision_vision_batch_and_modes",
+        "SmolVLM batch(4) vs single max |dp| 0.00e+00"
       ],
-      "implementation_note": "Multi-Context mit Bildern: Batch == Einzel bitgenau (tinygemma3); Encode-Batching per mtmd_batch-Lookahead ueber Kontexte. Offen: Timing-Beleg, M-RoPE-Modell."
+      "implementation_note": "Multi-Context: Batch == Einzel bitgenau fuer SmolVLM (4 Bilder), tinygemma3 (gemischt); max. ein Bild-Kontext pro Gruppe, Text-Kontexte weiter gebuendelt; Encode-Batching ueber mtmd_batch. Offen: Timing aus bench.py."
     },
     {
       "id": "VD-032",
@@ -411,13 +415,13 @@
       "milestone_id": "VD-M3",
       "title": "Weitere VLMs und Positionstypen",
       "type": "test",
-      "status": "todo",
+      "status": "partial",
       "priority": "P1",
       "risk": "high",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 90,
       "implementation": [
         "Gemma 3 (nicht-kausale Bildattention, normale Positionen), SmolVLM (idefics3), Qwen3-VL (IMROPE) pruefen.",
         "Kompatibilitaetsmatrix mit Belegen erstellen; nicht unterstuetzte Typen (z. B. HunyuanVL, Audio) konkret begruenden."
@@ -426,7 +430,8 @@
         "Mindestens 3 VLM-Familien mit Aequivalenztest belegt.",
         "Matrix in README mit Modell, Quant, Positionstyp, Status."
       ],
-      "evidence": []
+      "evidence": [],
+      "implementation_note": "Matrix: Qwen2.5-VL-3B (M-RoPE, Negativkontrolle), Qwen3-VL-2B (IMROPE, 1e-9..3e-7), SmolVLM-500M (idefics3, Slices; /completion-Vergleich wegen Tokenizer-Naht nicht moeglich -> Evaluate 86-100% auf 3 von 4 Feldern + Batch==Einzel), tinygemma3 (Gemma3, nicht-kausal). Nicht getestet: HunyuanVL (eigenes Layout, Code-Pfad ueber mtmd generisch), Audio (bewusst abgewiesen). Offen: Tabelle im README."
     },
     {
       "id": "VD-035",
@@ -505,14 +510,14 @@
       "milestone_id": "VD-M3",
       "title": "Security und Ressourcenlimits",
       "type": "security",
-      "status": "partial",
+      "status": "done",
       "priority": "P0",
       "risk": "high",
       "depends_on": [
         "VD-020",
         "VD-032"
       ],
-      "progress_percent": 30,
+      "progress_percent": 100,
       "implementation": [
         "Limits: Bilder pro Request, Bilder gesamt, Bild-Tokens gesamt, Kontexte; vorhandene Medienregeln (Remote-Limits, --media-path) wiederverwenden.",
         "Medien nur in contexts, nicht in instructions/schema.",
@@ -522,8 +527,11 @@
         "Jedes Limit hat einen Test oder einen reproduzierbaren curl-Beleg.",
         "Nach einem Fehler funktionieren folgende Requests normal."
       ],
-      "evidence": [],
-      "implementation_note": "pool_guard raeumt Sequenzen bei Fehlern; Folge-Request nach Fehler getestet; Medien nur in contexts. Offen: Limits (Anzahl Medien, Tokenbudget)."
+      "evidence": [
+        "unit/test_decision.py::test_decision_media_cache_and_limit",
+        "unit/test_decision.py::test_decision_vision_errors"
+      ],
+      "implementation_note": "--decision-max-media (vor jedem Laden), KV-Budget-400, handle_media-Regeln (Remote 10MB/10s, --media-path), Medien nur in contexts, Audio/Video abgewiesen, pool_guard raeumt bei Fehlern; Folge-Requests nach Fehlern getestet."
     },
     {
       "id": "VD-040",
@@ -553,14 +561,14 @@
       "milestone_id": "VD-M4",
       "title": "Regressionstests",
       "type": "test",
-      "status": "partial",
+      "status": "done",
       "priority": "P0",
       "risk": "medium",
       "depends_on": [
         "VD-011",
         "VD-022"
       ],
-      "progress_percent": 60,
+      "progress_percent": 100,
       "implementation": [
         "tools/server/tests/unit/test_decision.py: Text-only, Vision (tinygemma3), Fehlerfaelle, Limits.",
         "Keine neuen Dateien in tests/ (AGENTS.md)."
@@ -571,27 +579,30 @@
       "evidence": [
         "tools/server/tests/unit/test_decision.py"
       ],
-      "implementation_note": "test_decision.py: 12 Tests gruen (Text, Vision-Aequivalenz, Batch/Modi, Fehler, ohne mmproj, deaktiviert). Offen: Limits, Cache."
+      "implementation_note": "16 Tests in tools/server/tests/unit/test_decision.py gruen (seriell und mit xdist wie in CI); Upstream test_vision_api/test_basic ohne Regression."
     },
     {
       "id": "VD-042",
       "milestone_id": "VD-M4",
       "title": "CI-Workflow im Fork",
       "type": "infrastructure",
-      "status": "todo",
+      "status": "done",
       "priority": "P2",
       "risk": "low",
       "depends_on": [
         "VD-041"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "GitHub-Actions-Workflow fuer vision-decision: CPU-Build + test_decision.py."
       ],
       "acceptance_criteria": [
         "Workflow-Datei vorhanden und lokal mit act oder gleichwertigem Befehlsablauf nachvollzogen."
       ],
-      "evidence": []
+      "evidence": [
+        ".github/workflows/vision-decision.yml"
+      ],
+      "implementation_note": ".github/workflows/vision-decision.yml (CPU-Build, tests.sh unit/test_decision.py + unit/test_vision_api.py); Befehl lokal mit 2 xdist-Workern verifiziert (16 passed). Laeuft erst nach einem Push durch den Nutzer."
     },
     {
       "id": "VD-043",
@@ -618,20 +629,23 @@
       "milestone_id": "VD-M4",
       "title": "Playground",
       "type": "feature",
-      "status": "todo",
+      "status": "done",
       "priority": "P2",
       "risk": "low",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "Einfache statische Seite: Bild hochladen, Schema editieren, /v1/decision aufrufen, Wahrscheinlichkeiten und Timings anzeigen."
       ],
       "acceptance_criteria": [
         "Mit llama-server nutzbar, Anleitung im README."
       ],
-      "evidence": []
+      "evidence": [
+        "tools/parallel-decision/playground/index.html"
+      ],
+      "implementation_note": "playground/index.html: statisch, ohne Abhaengigkeiten; mit headless Chromium gegen SmolVLM getestet (4 Felder, Balken, Abstain, Timings, keine JS-Fehler, mobil ohne Horizontal-Scroll)."
     },
     {
       "id": "VD-050",
@@ -670,13 +684,13 @@
   "tasks_status_summary": {
     "total": 23,
     "by_status": {
-      "todo": 6,
+      "todo": 3,
       "in_progress": 0,
-      "partial": 7,
+      "partial": 5,
       "blocked": 0,
-      "done": 10
+      "done": 15
     },
-    "progress_percent_done": 43.5,
+    "progress_percent_done": 65.2,
     "by_priority": {
       "P0": 12,
       "P1": 8,
@@ -691,14 +705,14 @@
     },
     "critical_path": {
       "total": 6,
-      "done": 3,
-      "remaining": 3
+      "done": 4,
+      "remaining": 2
     },
     "milestones": {
       "total": 5,
-      "todo": 0,
+      "todo": 1,
       "in_progress": 0,
-      "partial": 3,
+      "partial": 2,
       "blocked": 0,
       "done": 2
     }
@@ -835,6 +849,48 @@
       "task": "VD-037",
       "progress": "100",
       "note": "abstain {min_probability, min_margin} pro Request/Feld; Felder markiert, result.abstained; Entscheidung bleibt schema-gueltig."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-030",
+      "progress": "100",
+      "note": "Mehrere Bilder pro Kontext: Qwen3-VL-2B Q8_0 Aequivalenz 3.2e-7 (2 Bilder, Frage zum zweiten), tinygemma3 im Test; Qwen2.5-VL Q4_K_M innerhalb seines Split-Rauschbodens (AGENT.md)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-031",
+      "progress": "90",
+      "note": "Multi-Context: Batch == Einzel bitgenau fuer SmolVLM (4 Bilder), tinygemma3 (gemischt); max. ein Bild-Kontext pro Gruppe, Text-Kontexte weiter gebuendelt; Encode-Batching ueber mtmd_batch. Offen: Timing aus bench.py."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-034",
+      "progress": "90",
+      "note": "Matrix: Qwen2.5-VL-3B (M-RoPE, Negativkontrolle), Qwen3-VL-2B (IMROPE, 1e-9..3e-7), SmolVLM-500M (idefics3, Slices; /completion-Vergleich wegen Tokenizer-Naht nicht moeglich -> Evaluate 86-100% auf 3 von 4 Feldern + Batch==Einzel), tinygemma3 (Gemma3, nicht-kausal). Nicht getestet: HunyuanVL (eigenes Layout, Code-Pfad ueber mtmd generisch), Audio (bewusst abgewiesen). Offen: Tabelle im README."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-038",
+      "progress": "100",
+      "note": "--decision-max-media (vor jedem Laden), KV-Budget-400, handle_media-Regeln (Remote 10MB/10s, --media-path), Medien nur in contexts, Audio/Video abgewiesen, pool_guard raeumt bei Fehlern; Folge-Requests nach Fehlern getestet."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-041",
+      "progress": "100",
+      "note": "16 Tests in tools/server/tests/unit/test_decision.py gruen (seriell und mit xdist wie in CI); Upstream test_vision_api/test_basic ohne Regression."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-042",
+      "progress": "100",
+      "note": ".github/workflows/vision-decision.yml (CPU-Build, tests.sh unit/test_decision.py + unit/test_vision_api.py); Befehl lokal mit 2 xdist-Workern verifiziert (16 passed). Laeuft erst nach einem Push durch den Nutzer."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-044",
+      "progress": "100",
+      "note": "playground/index.html: statisch, ohne Abhaengigkeiten; mit headless Chromium gegen SmolVLM getestet (4 Felder, Balken, Abstain, Timings, keine JS-Fehler, mobil ohne Horizontal-Scroll)."
     }
   ],
   "tasks_type_summary": {
@@ -874,34 +930,34 @@
       },
       "test": {
         "total": 7,
-        "done": 3,
+        "done": 4,
         "partial": 2,
         "blocked": 0,
-        "todo": 2,
+        "todo": 1,
         "in_progress": 0,
-        "progress_percent": 58.6,
+        "progress_percent": 77.1,
         "by_status": {
-          "todo": 2,
+          "todo": 1,
           "in_progress": 0,
           "partial": 2,
           "blocked": 0,
-          "done": 3
+          "done": 4
         }
       },
       "feature": {
         "total": 9,
-        "done": 4,
-        "partial": 4,
+        "done": 6,
+        "partial": 3,
         "blocked": 0,
-        "todo": 1,
+        "todo": 0,
         "in_progress": 0,
-        "progress_percent": 76.7,
+        "progress_percent": 95.6,
         "by_status": {
-          "todo": 1,
+          "todo": 0,
           "in_progress": 0,
-          "partial": 4,
+          "partial": 3,
           "blocked": 0,
-          "done": 4
+          "done": 6
         }
       },
       "performance": {
@@ -922,18 +978,18 @@
       },
       "security": {
         "total": 1,
-        "done": 0,
-        "partial": 1,
+        "done": 1,
+        "partial": 0,
         "blocked": 0,
         "todo": 0,
         "in_progress": 0,
-        "progress_percent": 30.0,
+        "progress_percent": 100.0,
         "by_status": {
           "todo": 0,
           "in_progress": 0,
-          "partial": 1,
+          "partial": 0,
           "blocked": 0,
-          "done": 0
+          "done": 1
         }
       },
       "benchmark": {
@@ -954,29 +1010,29 @@
       },
       "infrastructure": {
         "total": 1,
-        "done": 0,
+        "done": 1,
         "partial": 0,
         "blocked": 0,
-        "todo": 1,
+        "todo": 0,
         "in_progress": 0,
-        "progress_percent": 0.0,
+        "progress_percent": 100.0,
         "by_status": {
-          "todo": 1,
+          "todo": 0,
           "in_progress": 0,
           "partial": 0,
           "blocked": 0,
-          "done": 0
+          "done": 1
         }
       }
     }
   },
   "progress_summary": {
     "state": "partial",
-    "todo_remaining": 6,
+    "todo_remaining": 3,
     "in_progress": 0,
-    "partial": 7,
+    "partial": 5,
     "blocked": 0,
-    "done": 10,
+    "done": 15,
     "milestones_done": 2,
     "milestones_total": 5
   }
