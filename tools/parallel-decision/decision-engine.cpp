@@ -234,6 +234,13 @@ bool engine::prepare_prefix(const tokens_t & shared, bool allow_cache) {
     return false;
 }
 
+// Free the trunk and branch sequences; the cached prefix on seq_snap stays.
+void engine::clear_pool() {
+    for (llama_seq_id s = seq_pool; s < seq_pool + n_pool; ++s) {
+        llama_memory_seq_rm(mem, s, -1, -1);
+    }
+}
+
 // Score each branch as its own sequence forked from its trunk; return each branch's last-token
 // logits restricted to its candidate tokens. Groups are bounded by free sequences and batch rows.
 std::vector<std::vector<float>> engine::score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free) {
@@ -297,6 +304,15 @@ result engine::decide(const std::string & shared_text, const std::string & conte
 
 batch_result engine::decide_batch(const std::string & shared_text, const std::vector<std::string> & contexts,
                                   const std::vector<field_input> & inputs, const options & opt) {
+    std::vector<context_input> in(contexts.size());
+    for (size_t i = 0; i < contexts.size(); ++i) {
+        in[i].text = contexts[i];
+    }
+    return decide_batch(shared_text, in, inputs, opt);
+}
+
+batch_result engine::decide_batch(const std::string & shared_text, const std::vector<context_input> & contexts,
+                                  const std::vector<field_input> & inputs, const options & opt) {
     if (opt.mode != "auto" && opt.mode != "tree" && opt.mode != "greedy") {
         throw std::invalid_argument("mode must be auto, tree or greedy");
     }
@@ -304,10 +320,16 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         throw std::invalid_argument("a decision needs at least one context");
     }
     const tokens_t shared = tokenize(shared_text, true);
-    std::vector<tokens_t> prefixes;
-    for (const auto & text : contexts) {
-        prefixes.push_back(tokenize(text, shared.empty()));
-        if (prefixes.back().empty()) {
+    std::vector<tokens_t> prefixes(contexts.size());
+    for (size_t i = 0; i < contexts.size(); ++i) {
+        if (contexts[i].prefill) {
+            if (contexts[i].n_tokens == 0) {
+                throw std::invalid_argument("the decision context must not be empty");
+            }
+            continue;
+        }
+        prefixes[i] = tokenize(contexts[i].text, shared.empty());
+        if (prefixes[i].empty()) {
             throw std::invalid_argument("the decision context must not be empty");
         }
     }
@@ -378,12 +400,26 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
     out.cache_hit = prepare_prefix(shared, opt.allow_cache);
     out.prefill_ms += ms_since(t0);
 
+    // on error, free the trunks and branches so they do not keep KV cells
+    struct pool_guard {
+        engine * eng;
+        bool     armed = true;
+        ~pool_guard() {
+            if (armed) {
+                eng->clear_pool();
+            }
+        }
+    } guard { this };
+
+    std::vector<llama_pos> pos_next(contexts.size());
+
     // each context in a group holds one trunk sequence; the rest of the pool scores branches
     const size_t per_group = std::clamp<size_t>(n_pool / (1 + branches), 1, contexts.size());
     for (size_t g0 = 0; g0 < contexts.size(); g0 += per_group) {
         const size_t n_group = std::min(per_group, contexts.size() - g0);
 
         const auto tp = std::chrono::steady_clock::now();
+        const llama_pos pos_ctx = (llama_pos) shared.size();
         std::vector<prompt_part> parts;
         for (size_t i = 0; i < n_group; ++i) {
             const llama_seq_id trunk = seq_pool + (llama_seq_id) i;
@@ -391,9 +427,20 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             if (!shared.empty()) {
                 llama_memory_seq_cp(mem, seq_snap, trunk, -1, -1);
             }
-            parts.push_back({ &prefixes[g0 + i], (llama_pos) shared.size(), trunk });
+            if (!contexts[g0 + i].prefill) {
+                parts.push_back({ &prefixes[g0 + i], pos_ctx, trunk });
+                pos_next[g0 + i] = pos_ctx + (llama_pos) prefixes[g0 + i].size();
+            }
         }
         decode_parts(parts);
+        for (size_t i = 0; i < n_group; ++i) {
+            if (contexts[g0 + i].prefill) {
+                pos_next[g0 + i] = contexts[g0 + i].prefill(seq_pool + (llama_seq_id) i, pos_ctx);
+                if (pos_next[g0 + i] <= pos_ctx) {
+                    throw std::runtime_error("the context prefill did not advance the position");
+                }
+            }
+        }
         llama_synchronize(ctx); // llama_decode is asynchronous: wait for the prefill so its time isn't billed to scoring
         out.prefill_ms += ms_since(tp);
 
@@ -407,7 +454,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             std::vector<std::pair<size_t, size_t>> owner; // (context in group, field)
             for (size_t i = 0; i < n_group; ++i) {
                 const llama_seq_id trunk = seq_pool + (llama_seq_id) i;
-                const llama_pos    pos0  = (llama_pos) (shared.size() + prefixes[g0 + i].size());
+                const llama_pos    pos0  = pos_next[g0 + i];
                 for (size_t f = 0; f < state[i].size(); ++f) {
                     auto & fd = state[i][f];
                     if (fd.use_tree) {
@@ -465,7 +512,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         for (size_t i = 0; i < n_group; ++i) {
             llama_memory_seq_rm(mem, seq_pool + (llama_seq_id) i, -1, -1);
             result & r = out.items[g0 + i];
-            r.context_tokens = prefixes[g0 + i].size();
+            r.context_tokens = contexts[g0 + i].prefill ? contexts[g0 + i].n_tokens : prefixes[g0 + i].size();
             r.rows           = total;
             for (auto & fd : state[i]) {
                 if (fd.use_tree && fd.probs.empty()) {
@@ -476,6 +523,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         }
         out.scoring_ms += ms_since(ts);
     }
+    guard.armed = false;
     return out;
 }
 

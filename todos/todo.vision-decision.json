@@ -61,7 +61,7 @@
         "VD-010",
         "VD-011"
       ],
-      "status": "todo"
+      "status": "partial"
     },
     {
       "id": "VD-M2",
@@ -162,7 +162,7 @@
       "depends_on": [
         "VD-002"
       ],
-      "progress_percent": 40,
+      "progress_percent": 70,
       "implementation": [
         "CPU-Release-Build von llama-server und llama-parallel-decision.",
         "Text-only /v1/decision Baseline mit festem Modell/Request aufzeichnen (Werte und Wahrscheinlichkeiten).",
@@ -175,20 +175,20 @@
       "evidence": [
         "build log: cmake --build ... BUILD_EXIT=0"
       ],
-      "implementation_note": "CPU-Release-Build ok (llama-server, llama-parallel-decision, llama-mtmd-cli). Baseline und Regressionstests folgen, sobald Modelle geladen sind."
+      "implementation_note": "Build ok; Baseline-Binaries gesichert; Text-Baseline auf tinygemma3 aufgezeichnet. Offen: bestehende Server-Tests (test_vision_api, test_basic) laufen lassen."
     },
     {
       "id": "VD-010",
       "milestone_id": "VD-M1",
       "title": "Engine: Kontext als Text oder vom Aufrufer vorgefuellter Trunk",
       "type": "feature",
-      "status": "todo",
+      "status": "partial",
       "priority": "P0",
       "risk": "high",
       "depends_on": [
         "VD-002"
       ],
-      "progress_percent": 0,
+      "progress_percent": 80,
       "implementation": [
         "context_input einfuehren: Text-Tokens (Engine dekodiert gepackt wie bisher) oder Prefill-Callback (Aufrufer fuellt die Trunk-Sequenz ab pos0 und liefert pos_next).",
         "Branch-Positionen aus pos_next pro Trunk statt aus der Tokenanzahl ableiten.",
@@ -199,21 +199,24 @@
         "Bestehende string-API bleibt als duenner Wrapper erhalten; CLI kompiliert unveraendert.",
         "Fuer M-RoPE-Kontexte starten Branches bei pos_next des Trunks."
       ],
-      "evidence": []
+      "evidence": [
+        "tools/parallel-decision/decision-engine.{h,cpp}"
+      ],
+      "implementation_note": "context_input (Text oder Prefill-Callback) + pos_next pro Trunk + pool_guard fuer Fehlerpfade umgesetzt; Engine ohne mtmd. Offen: Nachweis mit M-RoPE-Kontext (VD-022)."
     },
     {
       "id": "VD-011",
       "milestone_id": "VD-M1",
       "title": "Text-only Regression bitgenau",
       "type": "test",
-      "status": "todo",
+      "status": "partial",
       "priority": "P0",
       "risk": "medium",
       "depends_on": [
         "VD-003",
         "VD-010"
       ],
-      "progress_percent": 0,
+      "progress_percent": 60,
       "implementation": [
         "Baseline-Request aus VD-003 nach dem Refactor erneut ausfuehren und Werte/Wahrscheinlichkeiten vergleichen."
       ],
@@ -221,7 +224,10 @@
         "Entscheidungen identisch, Wahrscheinlichkeiten gleich (bis auf Float-Rauschen < 1e-5).",
         "Automatisierter Test in tools/server/tests/unit/test_decision.py deckt Text-only ab."
       ],
-      "evidence": []
+      "evidence": [
+        "scratchpad regress/run_text.py + compare.py: mismatches 0"
+      ],
+      "implementation_note": "Alter vs neuer Server (tinygemma3, 6 Requests: tree/greedy/auto, multi-context, cache warm/kalt, Fehlerfall): 0 Abweichungen bei Toleranz 0. Offen: automatisierter Test in test_decision.py."
     },
     {
       "id": "VD-020",
@@ -628,9 +634,9 @@
   "tasks_status_summary": {
     "total": 23,
     "by_status": {
-      "todo": 20,
+      "todo": 18,
       "in_progress": 0,
-      "partial": 1,
+      "partial": 3,
       "blocked": 0,
       "done": 2
     },
@@ -654,9 +660,9 @@
     },
     "milestones": {
       "total": 5,
-      "todo": 4,
+      "todo": 3,
       "in_progress": 0,
-      "partial": 1,
+      "partial": 2,
       "blocked": 0,
       "done": 0
     }
@@ -679,6 +685,24 @@
       "task": "VD-003",
       "progress": "40",
       "note": "CPU-Release-Build ok (llama-server, llama-parallel-decision, llama-mtmd-cli). Baseline und Regressionstests folgen, sobald Modelle geladen sind."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-010",
+      "progress": "80",
+      "note": "context_input (Text oder Prefill-Callback) + pos_next pro Trunk + pool_guard fuer Fehlerpfade umgesetzt; Engine ohne mtmd. Offen: Nachweis mit M-RoPE-Kontext (VD-022)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-011",
+      "progress": "60",
+      "note": "Alter vs neuer Server (tinygemma3, 6 Requests: tree/greedy/auto, multi-context, cache warm/kalt, Fehlerfall): 0 Abweichungen bei Toleranz 0. Offen: automatisierter Test in test_decision.py."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-003",
+      "progress": "70",
+      "note": "Build ok; Baseline-Binaries gesichert; Text-Baseline auf tinygemma3 aufgezeichnet. Offen: bestehende Server-Tests (test_vision_api, test_basic) laufen lassen."
     }
   ],
   "tasks_type_summary": {
@@ -719,15 +743,15 @@
       "test": {
         "total": 7,
         "done": 0,
-        "partial": 1,
+        "partial": 2,
         "blocked": 0,
-        "todo": 6,
+        "todo": 5,
         "in_progress": 0,
-        "progress_percent": 5.7,
+        "progress_percent": 18.6,
         "by_status": {
-          "todo": 6,
+          "todo": 5,
           "in_progress": 0,
-          "partial": 1,
+          "partial": 2,
           "blocked": 0,
           "done": 0
         }
@@ -735,15 +759,15 @@
       "feature": {
         "total": 9,
         "done": 0,
-        "partial": 0,
+        "partial": 1,
         "blocked": 0,
-        "todo": 9,
+        "todo": 8,
         "in_progress": 0,
-        "progress_percent": 0.0,
+        "progress_percent": 8.9,
         "by_status": {
-          "todo": 9,
+          "todo": 8,
           "in_progress": 0,
-          "partial": 0,
+          "partial": 1,
           "blocked": 0,
           "done": 0
         }
@@ -816,9 +840,9 @@
   },
   "progress_summary": {
     "state": "partial",
-    "todo_remaining": 20,
+    "todo_remaining": 18,
     "in_progress": 0,
-    "partial": 1,
+    "partial": 3,
     "blocked": 0,
     "done": 2,
     "milestones_done": 0,

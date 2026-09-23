@@ -13,6 +13,7 @@
 #include "llama.h"
 #include "json.h"
 
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,15 @@ struct common_chat_templates;
 namespace llama_decision {
 
 using tokens_t = std::vector<llama_token>;
+
+// One context to decide on. The engine tokenizes and decodes `text` itself. With `prefill` set, the
+// caller decodes the context instead (e.g. with libmtmd): prefill(seq, pos0) fills `seq`, which already
+// holds the shared prefix at [0, pos0), and returns the position after the context.
+struct context_input {
+    std::string text;
+    std::function<llama_pos(llama_seq_id seq, llama_pos pos0)> prefill;
+    size_t n_tokens = 0; // prefill contexts: tokens the caller decodes
+};
 
 // One field as the scorer sees it: the text before its value and the allowed value texts.
 struct field_input {
@@ -82,6 +92,11 @@ class engine {
     batch_result decide_batch(const std::string & shared_text, const std::vector<std::string> & contexts,
                               const std::vector<field_input> & fields, const options & opt);
 
+    // Same, with contexts that may be prefilled by the caller. Branches fork from each trunk's next
+    // position, so contexts whose positions differ from their token count (M-RoPE images) work.
+    batch_result decide_batch(const std::string & shared_text, const std::vector<context_input> & contexts,
+                              const std::vector<field_input> & fields, const options & opt);
+
   private:
     struct prompt_part {
         const tokens_t * toks;
@@ -105,6 +120,7 @@ class engine {
     tokens_t tokenize(const std::string & text, bool add_special) const;
     void     decode_parts(const std::vector<prompt_part> & parts);
     bool     prepare_prefix(const tokens_t & shared, bool allow_cache);
+    void     clear_pool();
     std::vector<std::vector<float>> score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free);
 };
 
