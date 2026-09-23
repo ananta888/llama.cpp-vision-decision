@@ -61,7 +61,7 @@
         "VD-010",
         "VD-011"
       ],
-      "status": "partial"
+      "status": "done"
     },
     {
       "id": "VD-M2",
@@ -183,13 +183,13 @@
       "milestone_id": "VD-M1",
       "title": "Engine: Kontext als Text oder vom Aufrufer vorgefuellter Trunk",
       "type": "feature",
-      "status": "partial",
+      "status": "done",
       "priority": "P0",
       "risk": "high",
       "depends_on": [
         "VD-002"
       ],
-      "progress_percent": 90,
+      "progress_percent": 100,
       "implementation": [
         "context_input einfuehren: Text-Tokens (Engine dekodiert gepackt wie bisher) oder Prefill-Callback (Aufrufer fuellt die Trunk-Sequenz ab pos0 und liefert pos_next).",
         "Branch-Positionen aus pos_next pro Trunk statt aus der Tokenanzahl ableiten.",
@@ -201,9 +201,10 @@
         "Fuer M-RoPE-Kontexte starten Branches bei pos_next des Trunks."
       ],
       "evidence": [
-        "tools/parallel-decision/decision-engine.{h,cpp}"
+        "tools/parallel-decision/decision-engine.{h,cpp}",
+        "tools/parallel-decision/bench/equivalence.py"
       ],
-      "implementation_note": "Umgesetzt + max_group-Option. Offen nur: Nachweis M-RoPE (Qwen2.5-VL)."
+      "implementation_note": "Branches starten bei pos_next; M-RoPE-Nachweis mit Qwen2.5-VL erbracht (siehe VD-022)."
     },
     {
       "id": "VD-011",
@@ -289,13 +290,13 @@
       "milestone_id": "VD-M2",
       "title": "Qwen2.5-VL-3B Single-Image End-to-End",
       "type": "test",
-      "status": "todo",
+      "status": "done",
       "priority": "P0",
       "risk": "high",
       "depends_on": [
         "VD-021"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "Qwen2.5-VL-3B-Instruct Q4_K_M + mmproj laden, mehrere Felder zu einem Bild entscheiden.",
         "Aequivalenztest: Tree-Wahrscheinlichkeit eines Feldes gegen Next-Token-Verteilung von /completion auf identischem multimodalem Prompt (renormalisiert) pruefen."
@@ -304,7 +305,11 @@
         "Aequivalenz innerhalb Toleranz (abs. Differenz < 1e-3) belegt -> Positionen und KV korrekt.",
         "Plausible Entscheidungen auf Testbildern, Response mit probability und timings dokumentiert."
       ],
-      "evidence": []
+      "evidence": [
+        "bench/equivalence.py --image shapes512/0000.png --choices 1,2,3,4: ok 4.80e-04, bug 2.13e-01",
+        "bench/equivalence.py --image shapes512/0001.png: ok 6.70e-04, bug 2.67e-01"
+      ],
+      "implementation_note": "Qwen2.5-VL-3B Q4_K_M + mmproj Q8_0, CPU: Aequivalenz decision vs /completion 1.8e-5..8.3e-4 (256px, 81 Bildtoken auf 9 Positionen) und 4.8e-4/6.7e-4 (512px, 324 Token). Negativkontrolle (Branch-Position = Tokenanzahl, temporaer): 0.213/0.267 -> Test erkennt Positionsfehler mit >400x Abstand. Antworten korrekt (Form/Farbe/Anzahl)."
     },
     {
       "id": "VD-030",
@@ -357,13 +362,13 @@
       "milestone_id": "VD-M3",
       "title": "KV-Budget und Gruppierung nach Tokenbudget",
       "type": "feature",
-      "status": "todo",
+      "status": "done",
       "priority": "P1",
       "risk": "high",
       "depends_on": [
         "VD-031"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "Gruppengroesse nicht nur nach Sequenzen, sondern auch nach KV-Zellen begrenzen (Bilder sind gross).",
         "Klarer Fehler statt Absturz, wenn ein einzelner Kontext nicht passt."
@@ -371,20 +376,23 @@
       "acceptance_criteria": [
         "Request mit vielen grossen Bildern laeuft ohne 'no KV space' durch oder liefert 400 mit Budget-Hinweis."
       ],
-      "evidence": []
+      "evidence": [
+        "unit/test_decision.py::test_decision_kv_budget"
+      ],
+      "implementation_note": "Gruppen nach KV-Budget (Prefix + Trunks + eine Runde Branch-Zeilen); Einzelkontext > KV -> 400 vor jedem Decode."
     },
     {
       "id": "VD-033",
       "milestone_id": "VD-M3",
       "title": "Cache: Bild-Embeddings und Prefix",
       "type": "performance",
-      "status": "todo",
+      "status": "done",
       "priority": "P1",
       "risk": "medium",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "Pruefen, ob ein Embedding-Cache (Key = Bitmap-ID/SHA-256) den Encoder bei wiederholten Bildern spart; mit Byte-Limit (LRU).",
         "Prefix-Cache (Schema/Instruktionen) weiter nutzen; cache-Statistik in usage melden."
@@ -393,7 +401,10 @@
         "Wiederholtes Bild: Encoder-Zeit messbar reduziert, Ergebnis identisch.",
         "Speicherlimit konfigurierbar und eingehalten."
       ],
-      "evidence": []
+      "evidence": [
+        "unit/test_decision.py::test_decision_media_cache_and_limit"
+      ],
+      "implementation_note": "LRU-Embedding-Cache (--decision-media-cache MiB, Key = Bild-SHA256 + Slice-Index pro Kontext); bitgenau gleiche Ergebnisse, Treffer ueber Requests und innerhalb eines Requests; usage.media_cached."
     },
     {
       "id": "VD-034",
@@ -443,13 +454,13 @@
       "milestone_id": "VD-M3",
       "title": "Kalibrierung und Unsicherheitsmasse",
       "type": "feature",
-      "status": "todo",
+      "status": "partial",
       "priority": "P2",
       "risk": "medium",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 80,
       "implementation": [
         "Pro Feld Temperatur-Skalierung der Logits als Option; margin und entropy im Ergebnis.",
         "Skript, das Temperatur auf gelabelten Daten fittet und ECE meldet."
@@ -458,20 +469,24 @@
         "Temperatur 1.0 aendert nichts (Regression).",
         "Kalibrierungsskript dokumentiert und an einem Beispiel ausgefuehrt."
       ],
-      "evidence": []
+      "evidence": [
+        "unit/test_decision.py::test_decision_calibration_and_abstain",
+        "bench/evaluate.py"
+      ],
+      "implementation_note": "Temperatur (Pfad-Ebene p^(1/T), greedy pro Schritt), margin/entropy, return_probs; evaluate.py fittet T pro Feld (NLL) und meldet ECE. Offen: Lauf auf Qwen dokumentieren."
     },
     {
       "id": "VD-037",
       "milestone_id": "VD-M3",
       "title": "Abstain/Fallback-Schnittstelle",
       "type": "feature",
-      "status": "todo",
+      "status": "done",
       "priority": "P1",
       "risk": "medium",
       "depends_on": [
         "VD-036"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "Option abstain: min_probability / min_margin pro Request oder Feld.",
         "Ergebnis markiert betroffene Felder und listet sie fuer einen Fallback (z. B. groesseres Modell) auf; Entscheidung bleibt schema-gueltig."
@@ -480,7 +495,10 @@
         "Dokumentiert: Schema-Gueltigkeit ist keine fachliche Richtigkeit.",
         "Test deckt abstain an und aus ab."
       ],
-      "evidence": []
+      "evidence": [
+        "unit/test_decision.py::test_decision_calibration_and_abstain"
+      ],
+      "implementation_note": "abstain {min_probability, min_margin} pro Request/Feld; Felder markiert, result.abstained; Entscheidung bleibt schema-gueltig."
     },
     {
       "id": "VD-038",
@@ -652,13 +670,13 @@
   "tasks_status_summary": {
     "total": 23,
     "by_status": {
-      "todo": 11,
+      "todo": 6,
       "in_progress": 0,
       "partial": 7,
       "blocked": 0,
-      "done": 5
+      "done": 10
     },
-    "progress_percent_done": 21.7,
+    "progress_percent_done": 43.5,
     "by_priority": {
       "P0": 12,
       "P1": 8,
@@ -673,16 +691,16 @@
     },
     "critical_path": {
       "total": 6,
-      "done": 1,
-      "remaining": 5
+      "done": 3,
+      "remaining": 3
     },
     "milestones": {
       "total": 5,
       "todo": 0,
       "in_progress": 0,
-      "partial": 4,
+      "partial": 3,
       "blocked": 0,
-      "done": 1
+      "done": 2
     }
   },
   "log": [
@@ -781,6 +799,42 @@
       "task": "VD-010",
       "progress": "90",
       "note": "Umgesetzt + max_group-Option. Offen nur: Nachweis M-RoPE (Qwen2.5-VL)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-010",
+      "progress": "100",
+      "note": "Branches starten bei pos_next; M-RoPE-Nachweis mit Qwen2.5-VL erbracht (siehe VD-022)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-022",
+      "progress": "100",
+      "note": "Qwen2.5-VL-3B Q4_K_M + mmproj Q8_0, CPU: Aequivalenz decision vs /completion 1.8e-5..8.3e-4 (256px, 81 Bildtoken auf 9 Positionen) und 4.8e-4/6.7e-4 (512px, 324 Token). Negativkontrolle (Branch-Position = Tokenanzahl, temporaer): 0.213/0.267 -> Test erkennt Positionsfehler mit >400x Abstand. Antworten korrekt (Form/Farbe/Anzahl)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-032",
+      "progress": "100",
+      "note": "Gruppen nach KV-Budget (Prefix + Trunks + eine Runde Branch-Zeilen); Einzelkontext > KV -> 400 vor jedem Decode."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-033",
+      "progress": "100",
+      "note": "LRU-Embedding-Cache (--decision-media-cache MiB, Key = Bild-SHA256 + Slice-Index pro Kontext); bitgenau gleiche Ergebnisse, Treffer ueber Requests und innerhalb eines Requests; usage.media_cached."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-036",
+      "progress": "80",
+      "note": "Temperatur (Pfad-Ebene p^(1/T), greedy pro Schritt), margin/entropy, return_probs; evaluate.py fittet T pro Feld (NLL) und meldet ECE. Offen: Lauf auf Qwen dokumentieren."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-037",
+      "progress": "100",
+      "note": "abstain {min_probability, min_margin} pro Request/Feld; Felder markiert, result.abstained; Entscheidung bleibt schema-gueltig."
     }
   ],
   "tasks_type_summary": {
@@ -820,50 +874,50 @@
       },
       "test": {
         "total": 7,
-        "done": 2,
+        "done": 3,
         "partial": 2,
         "blocked": 0,
-        "todo": 3,
+        "todo": 2,
         "in_progress": 0,
-        "progress_percent": 44.3,
+        "progress_percent": 58.6,
         "by_status": {
-          "todo": 3,
+          "todo": 2,
           "in_progress": 0,
           "partial": 2,
           "blocked": 0,
-          "done": 2
+          "done": 3
         }
       },
       "feature": {
         "total": 9,
-        "done": 1,
+        "done": 4,
         "partial": 4,
         "blocked": 0,
-        "todo": 4,
+        "todo": 1,
         "in_progress": 0,
-        "progress_percent": 44.4,
+        "progress_percent": 76.7,
         "by_status": {
-          "todo": 4,
+          "todo": 1,
           "in_progress": 0,
           "partial": 4,
           "blocked": 0,
-          "done": 1
+          "done": 4
         }
       },
       "performance": {
         "total": 1,
-        "done": 0,
+        "done": 1,
         "partial": 0,
         "blocked": 0,
-        "todo": 1,
+        "todo": 0,
         "in_progress": 0,
-        "progress_percent": 0.0,
+        "progress_percent": 100.0,
         "by_status": {
-          "todo": 1,
+          "todo": 0,
           "in_progress": 0,
           "partial": 0,
           "blocked": 0,
-          "done": 0
+          "done": 1
         }
       },
       "security": {
@@ -918,12 +972,12 @@
   },
   "progress_summary": {
     "state": "partial",
-    "todo_remaining": 11,
+    "todo_remaining": 6,
     "in_progress": 0,
     "partial": 7,
     "blocked": 0,
-    "done": 5,
-    "milestones_done": 1,
+    "done": 10,
+    "milestones_done": 2,
     "milestones_total": 5
   }
 }
