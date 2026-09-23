@@ -1,0 +1,65 @@
+name: Vision decision
+
+on:
+  workflow_dispatch: # allows manual triggering
+  push:
+    branches:
+      - vision-decision
+    paths: [
+      '.github/workflows/vision-decision.yml',
+      '**/CMakeLists.txt',
+      '**/*.h',
+      '**/*.hpp',
+      '**/*.c',
+      '**/*.cpp',
+      'tools/server/tests/**.*',
+      'tools/parallel-decision/**.*'
+    ]
+  pull_request:
+    branches:
+      - vision-decision
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Dependencies
+        id: depends
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install build-essential git cmake curl libssl-dev
+
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: Build
+        id: cmake_build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j $(nproc) --target llama-server llama-parallel-decision
+
+      - name: Python setup
+        id: setup_python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          pip-install: -r tools/server/tests/requirements.txt
+
+      - name: Decision tests
+        id: decision_tests
+        run: |
+          cd tools/server/tests
+          ./tests.sh unit/test_decision.py
+
+      - name: Vision regression tests
+        id: vision_tests
+        run: |
+          cd tools/server/tests
+          ./tests.sh unit/test_vision_api.py

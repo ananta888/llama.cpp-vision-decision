@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vision Decision Playground</title>
+<style>
+  :root { --bg: #f7f7f5; --fg: #1d1d1f; --muted: #6b6b70; --card: #fff; --line: #deded9; --accent: #2f6fdb; --warn: #c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141416; --fg: #ececef; --muted: #9a9aa2; --card: #1d1d21; --line: #33333a; --accent: #6ea0ff; --warn: #fb923c; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 800px) { main { grid-template-columns: minmax(0, 1fr); } }
+  h1 { font-size: 18px; max-width: 1100px; margin: 0 auto; padding: 16px 16px 0; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px; }
+  input[type=text], input[type=number], select, textarea { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
+  textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 180px; }
+  .row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  button { margin-top: 12px; background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 16px; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  #thumbs img { max-width: 120px; max-height: 120px; margin: 6px 6px 0 0; border-radius: 4px; border: 1px solid var(--line); }
+  .field { margin: 10px 0; }
+  .field h3 { font-size: 14px; margin: 0 0 4px; display: flex; justify-content: space-between; gap: 8px; }
+  .abstain { color: var(--warn); font-size: 12px; }
+  .bar { display: grid; grid-template-columns: 110px minmax(0, 1fr) 56px; gap: 6px; align-items: center; font-size: 12px; }
+  .bar div.track { background: var(--bg); border-radius: 3px; height: 10px; overflow: hidden; }
+  .bar div.fill { background: var(--accent); height: 100%; }
+  .bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; color: var(--muted); }
+  .err { color: var(--warn); }
+</style>
+</head>
+<body>
+<h1>Vision Decision Playground</h1>
+<main>
+<section>
+  <label>Server</label>
+  <input id="url" type="text" value="http://127.0.0.1:8080">
+  <label>Images</label>
+  <input id="files" type="file" accept="image/*" multiple>
+  <div id="thumbs"></div>
+  <label>Text after the images</label>
+  <input id="text" type="text" value="Answer the questions about this picture.">
+  <label>Schema</label>
+  <textarea id="schema">{
+  "shape": {"type": "enum", "choices": ["circle", "square", "triangle"], "description": "Which shape is drawn?"},
+  "color": {"type": "enum", "choices": ["red", "green", "blue", "yellow"], "description": "What colour are the shapes?"},
+  "count": {"type": "integer", "minimum": 1, "maximum": 4, "description": "How many shapes are there?"},
+  "dark_background": {"type": "boolean", "description": "Is the background dark?"}
+}</textarea>
+  <div class="row">
+    <div><label>Mode</label><select id="mode"><option>auto</option><option>tree</option><option>greedy</option></select></div>
+    <div><label>Temperature</label><input id="temp" type="number" value="1" min="0.05" step="0.05"></div>
+    <div><label>Abstain below p</label><input id="minp" type="number" value="0" min="0" max="1" step="0.05"></div>
+  </div>
+  <button id="run">Decide</button>
+</section>
+<section>
+  <div id="out"><pre>Pick an image and press Decide.</pre></div>
+</section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let images = [];
+
+$("files").addEventListener("change", async (e) => {
+  images = await Promise.all([...e.target.files].map((f) => new Promise((ok) => {
+    const r = new FileReader();
+    r.onload = () => ok(r.result);
+    r.readAsDataURL(f);
+  })));
+  $("thumbs").innerHTML = "";
+  for (const src of images) {
+    const img = document.createElement("img");
+    img.src = src;
+    $("thumbs").appendChild(img);
+  }
+});
+
+function el(tag, attrs, text) {
+  const n = document.createElement(tag);
+  Object.assign(n, attrs || {});
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function render(res) {
+  const out = $("out");
+  out.innerHTML = "";
+  const r = res.results[0];
+  for (const [name, f] of Object.entries(r.fields)) {
+    const box = el("div", { className: "field" });
+    const h = el("h3");
+    h.appendChild(el("span", {}, name + " = " + JSON.stringify(f.value)));
+    if (f.abstain) h.appendChild(el("span", { className: "abstain" }, "abstain"));
+    box.appendChild(h);
+    const probs = f.probs || [{ value: f.value, probability: f.probability }];
+    for (const c of probs) {
+      const bar = el("div", { className: "bar" });
+      bar.appendChild(el("span", {}, JSON.stringify(c.value)));
+      const track = el("div", { className: "track" });
+      const fill = el("div", { className: "fill" });
+      fill.style.width = (100 * c.probability).toFixed(1) + "%";
+      track.appendChild(fill);
+      bar.appendChild(track);
+      bar.appendChild(el("span", {}, (100 * c.probability).toFixed(1) + "%"));
+      box.appendChild(bar);
+    }
+    if (f.margin !== undefined) box.appendChild(el("pre", {}, "margin " + f.margin.toFixed(3) + "  entropy " + f.entropy.toFixed(3)));
+    out.appendChild(box);
+  }
+  out.appendChild(el("pre", {}, "timings " + JSON.stringify(res.timings, null, 1) + "\nusage " + JSON.stringify(res.usage, null, 1)));
+}
+
+$("run").addEventListener("click", async () => {
+  const out = $("out");
+  let schema;
+  try { schema = JSON.parse($("schema").value); } catch (e) { out.innerHTML = ""; out.appendChild(el("pre", { className: "err" }, "schema: " + e.message)); return; }
+  const parts = images.map((u) => ({ type: "image_url", image_url: { url: u } }));
+  if ($("text").value) parts.push({ type: "text", text: $("text").value });
+  const body = { schema, contexts: [parts.length ? parts : $("text").value], mode: $("mode").value,
+                 temperature: parseFloat($("temp").value), return_probs: true };
+  const minp = parseFloat($("minp").value);
+  if (minp > 0) body.abstain = { min_probability: minp };
+  $("run").disabled = true;
+  out.innerHTML = "";
+  out.appendChild(el("pre", {}, "deciding..."));
+  try {
+    const r = await fetch($("url").value.replace(/\/$/, "") + "/v1/decision", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const js = await r.json();
+    if (!r.ok) throw new Error(js.error ? js.error.message : r.statusText);
+    render(js);
+  } catch (e) {
+    out.innerHTML = "";
+    out.appendChild(el("pre", { className: "err" }, String(e.message || e)));
+  } finally {
+    $("run").disabled = false;
+  }
+});
+</script>
+</body>
+</html>
