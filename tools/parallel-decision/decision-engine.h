@@ -37,6 +37,7 @@ struct context_input {
 struct field_input {
     std::string              suffix;     // e.g.  '  "fire": '
     std::vector<std::string> candidates; // allowed values, with the suffix's shared prefix removed
+    float                    temperature = 1.0f; // tree: p(value)^(1/T), renormalised; greedy: per step
 };
 
 struct options {
@@ -135,6 +136,9 @@ struct field_spec {
     std::vector<common_json> values;      // typed values; index = candidate index
     std::vector<double>      numbers;     // numeric fields: the same values as doubles
     std::vector<std::string> encoded;     // JSON text of each value
+    float                    temperature     = 1.0f;
+    double                   min_probability = 0; // abstain below this probability
+    double                   min_margin      = 0; // abstain below this top-2 margin (tree fields)
 };
 
 struct compiled_schema {
@@ -145,7 +149,10 @@ struct compiled_schema {
 
 // Accepts compact field specs {"name": {"type": ..., "description": ..., ...}} or a JSON Schema
 // object with "properties" (boolean, string+enum, integer min/max, number min/max/multipleOf).
-compiled_schema compile_schema(const common_json & schema, const std::string & instructions);
+// defaults: request-wide {"temperature": T, "abstain": {"min_probability": p, "min_margin": m}}; a field's
+// own "temperature" / "abstain" ("x-temperature" / "x-abstain" in JSON Schema) wins.
+compiled_schema compile_schema(const common_json & schema, const std::string & instructions,
+                               const common_json & defaults = common_json::object());
 
 // Renders system + user messages with the model's chat template (thinking disabled) and splits
 // the prompt into the static prefix (cached across requests) and the per-request part: the
@@ -153,7 +160,9 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
 std::pair<std::string, std::string> render_prompt(const common_chat_templates * tmpls, bool use_jinja,
                                                   const std::string & system_text, const std::string & context);
 
-// {"decision": {...}, "fields": {...}} from the scores, applying each numeric field's aggregate.
-common_json assemble(const compiled_schema & cs, const result & r);
+// {"decision": {...}, "fields": {...}} from the scores, applying each numeric field's aggregate. Tree fields
+// also get margin and entropy; with_probs adds every allowed value with its probability. Fields with an
+// abstain rule get "abstain", and the result lists them in "abstained". The decision stays schema-valid.
+common_json assemble(const compiled_schema & cs, const result & r, bool with_probs = false);
 
 } // namespace llama_decision

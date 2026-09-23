@@ -200,3 +200,33 @@ def test_decision_kv_budget():
     assert res.status_code == 400
     assert "does not fit the KV cache" in res.body["error"]["message"]
     decide({"schema": SCHEMA, "contexts": [image_context([0])]})
+
+
+def test_decision_calibration_and_abstain():
+    global server
+    server.start()
+    data = {"schema": SCHEMA, "contexts": [image_context([1])], "return_probs": True}
+    base = decide(data)["results"][0]["fields"]
+    for f in base.values():
+        probs = [c["probability"] for c in f["probs"]]
+        assert abs(sum(probs) - 1.0) < 1e-5
+        top2 = sorted(probs, reverse=True)[:2]
+        assert abs(f["margin"] - (top2[0] - top2[1])) < 1e-6
+        assert abs(f["entropy"] + sum(p * math.log(p) for p in probs if p > 0)) < 1e-5
+        assert "abstain" not in f
+    # temperature scales the whole-value distribution: p^(1/T), renormalised
+    hot = decide(dict(data, temperature=2.0, schema=dict(SCHEMA, label=dict(SCHEMA["label"], temperature=0.5))))["results"][0]["fields"]
+    for name, t in (("label", 0.5), ("animal", 2.0), ("count", 2.0)):
+        p = [c["probability"] ** (1.0 / t) for c in base[name]["probs"]]
+        z = sum(p)
+        for c, q in zip(hot[name]["probs"], p):
+            assert abs(c["probability"] - q / z) < 1e-5
+    # abstain marks uncertain fields; the decision keeps a schema-valid value for every field
+    body = decide({"schema": SCHEMA, "contexts": [image_context([1])], "abstain": {"min_probability": 0.99}})
+    r = body["results"][0]
+    assert set(r["decision"]) == set(SCHEMA)
+    assert r["abstained"] == [n for n, f in r["fields"].items() if f["probability"] < 0.99]
+    assert all(f["abstain"] == (f["probability"] < 0.99) for f in r["fields"].values())
+    for bad in ({"temperature": 0}, {"temperature": "hot"}, {"abstain": {"min_probability": 2}}):
+        res = server.make_request("POST", "/v1/decision", data=dict({"schema": SCHEMA, "contexts": ["x"]}, **bad))
+        assert res.status_code == 400

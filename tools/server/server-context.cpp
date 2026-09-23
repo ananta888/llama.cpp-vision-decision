@@ -2493,7 +2493,13 @@ private:
             decision_engine = std::make_unique<llama_decision::engine>(ctx_tgt, (llama_seq_id) params_base.n_parallel,
                                                                         params_base.n_seq_decision);
         }
-        const auto cs = llama_decision::compile_schema(body.at("schema"), body.value("instructions", std::string()));
+        json calibration = json::object();
+        for (const char * key : { "temperature", "abstain" }) {
+            if (body.contains(key)) {
+                calibration[key] = body.at(key);
+            }
+        }
+        const auto cs = llama_decision::compile_schema(body.at("schema"), body.value("instructions", std::string()), calibration);
         std::string shared;
         std::vector<std::string> dynamic;
         for (const auto & c : contexts) {
@@ -2597,7 +2603,7 @@ private:
 
         json results = json::array();
         for (const auto & r : b.items) {
-            json item = llama_decision::assemble(cs, r);
+            json item = llama_decision::assemble(cs, r, body.value("return_probs", false));
             item["usage"] = { { "context_tokens", (long long) r.context_tokens }, { "scored_rows", r.rows } };
             results.push_back(item);
         }

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <stdexcept>
 
 namespace llama_decision {
@@ -30,6 +31,7 @@ struct decision_field {
     std::vector<float>    probs;
 
     bool  use_tree     = false;
+    float temperature  = 1.0f;
     int   winner       = -1;
     float path_score   = 1.0f;
     int   scored_nodes = 0;
@@ -153,6 +155,9 @@ struct decision_field {
                 }
                 path_lp[i] += node_logp[n][it - opts.begin()];
             }
+        }
+        for (float & x : path_lp) {
+            x /= temperature;
         }
         const int best = (int) (std::max_element(path_lp.begin(), path_lp.end()) - path_lp.begin());
         double z = 0;
@@ -342,6 +347,9 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         if (n < 1 || n > 255) {
             throw std::invalid_argument("each field needs 1-255 allowed values");
         }
+        if (!(in.temperature > 0.0f)) {
+            throw std::invalid_argument("a field temperature must be positive");
+        }
         tokens_t suffix;
         std::vector<tokens_t> paths;
         if (opt.split_boundary) {
@@ -384,6 +392,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             }
         }
         decision_field field(suffix, paths);
+        field.temperature = in.temperature;
         field.build_nodes();
         field.use_tree = opt.mode == "tree" ? true : opt.mode == "greedy" ? false : n <= opt.tree_max;
         total    += field.use_tree ? field.tree_rows() : (int) (suffix.size() + max_path);
@@ -514,7 +523,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
                     const int    best = (int) (std::max_element(s.begin(), s.end()) - s.begin());
                     double denom = 0;
                     for (float x : s) {
-                        denom += std::exp(x - s[best]);
+                        denom += std::exp((x - s[best]) / fd.temperature);
                     }
                     fd.select(todo[row].cands[best], (float) (1.0 / denom));
                 }
@@ -654,7 +663,7 @@ field_spec make_field(const std::string & name, const std::string & type, const 
 
 } // namespace
 
-compiled_schema compile_schema(const common_json & schema, const std::string & instructions) {
+compiled_schema compile_schema(const common_json & schema, const std::string & instructions, const common_json & defaults) {
     if (!schema.is_object()) {
         throw std::invalid_argument("\"schema\" must be an object");
     }
@@ -677,7 +686,24 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         if (!json_schema && description.empty()) {
             throw std::invalid_argument("field \"" + e.key() + "\" needs a description");
         }
-        cs.specs.push_back(make_field(e.key(), type, description, spec, json_schema));
+        field_spec f = make_field(e.key(), type, description, spec, json_schema);
+        const char * t_key = json_schema ? "x-temperature" : "temperature";
+        const char * a_key = json_schema ? "x-abstain" : "abstain";
+        const common_json t = spec.contains(t_key) ? spec.at(t_key) : defaults.value("temperature", common_json(1.0));
+        if (!t.is_number() || !(t.get<double>() > 0) || t.get<double>() > 100) {
+            throw std::invalid_argument("field \"" + f.name + "\": temperature must be a number in (0, 100]");
+        }
+        f.temperature = t.get<float>();
+        const common_json ab = spec.contains(a_key) ? spec.at(a_key) : defaults.value("abstain", common_json::object());
+        if (!ab.is_object()) {
+            throw std::invalid_argument("field \"" + f.name + "\": abstain must be an object");
+        }
+        f.min_probability = ab.value("min_probability", 0.0);
+        f.min_margin      = ab.value("min_margin", 0.0);
+        if (f.min_probability < 0 || f.min_probability > 1 || f.min_margin < 0 || f.min_margin > 1) {
+            throw std::invalid_argument("field \"" + f.name + "\": abstain thresholds must be in [0, 1]");
+        }
+        cs.specs.push_back(std::move(f));
     }
 
     std::string catalog;
@@ -692,7 +718,8 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
             common.resize(c);
         }
         field_input in;
-        in.suffix = "  " + json_text(f.name) + ": " + common;
+        in.suffix      = "  " + json_text(f.name) + ": " + common;
+        in.temperature = f.temperature;
         for (const auto & v : f.encoded) {
             in.candidates.push_back(v.substr(common.size()));
         }
@@ -735,16 +762,19 @@ std::pair<std::string, std::string> render_prompt(const common_chat_templates * 
     return { prompt.substr(0, at), context + prompt.substr(at + sentinel.size()) + "{\n" };
 }
 
-common_json assemble(const compiled_schema & cs, const result & r) {
-    common_json decision = common_json::object();
-    common_json fields   = common_json::object();
+common_json assemble(const compiled_schema & cs, const result & r, bool with_probs) {
+    common_json decision  = common_json::object();
+    common_json fields    = common_json::object();
+    common_json abstained = common_json::array();
+    bool        rules     = false;
     for (size_t i = 0; i < cs.specs.size(); ++i) {
         const auto & sp = cs.specs[i];
         const auto & fr = r.fields[i];
         int idx = fr.winner;
         common_json f = common_json::object();
         const bool numeric = !sp.numbers.empty();
-        if (numeric && fr.probs.size() == sp.values.size()) {
+        const bool tree    = fr.probs.size() == sp.values.size();
+        if (numeric && tree) {
             std::vector<int> order(sp.values.size());
             for (size_t k = 0; k < order.size(); ++k) {
                 order[k] = (int) k;
@@ -782,17 +812,47 @@ common_json assemble(const compiled_schema & cs, const result & r) {
         if (idx < 0 || idx >= (int) sp.values.size()) {
             throw std::runtime_error("field \"" + sp.name + "\" has no selected value");
         }
+        const double p = tree ? fr.probs[idx] : fr.path_score;
         decision[sp.name] = sp.values[idx];
         f["value"]        = sp.values[idx];
-        f["probability"]  = (double) (fr.probs.size() == sp.values.size() ? fr.probs[idx] : fr.path_score);
+        f["probability"]  = p;
         f["scored_nodes"] = fr.scored_nodes;
         f["tree"]         = fr.tree;
-        fields[sp.name]   = f;
+        double margin = 1.0;
+        if (tree) {
+            std::vector<float> sorted = fr.probs;
+            std::sort(sorted.begin(), sorted.end(), std::greater<float>());
+            margin = sorted[0] - (sorted.size() > 1 ? sorted[1] : 0.0f);
+            double entropy = 0;
+            for (float q : fr.probs) {
+                entropy -= q > 0 ? q * std::log(q) : 0.0;
+            }
+            f["margin"]  = margin;
+            f["entropy"] = entropy; // nats
+            if (with_probs) {
+                common_json probs = common_json::array();
+                for (size_t k = 0; k < sp.values.size(); ++k) {
+                    probs.push_back({ { "value", sp.values[k] }, { "probability", fr.probs[k] } });
+                }
+                f["probs"] = probs;
+            }
+        }
+        if (sp.min_probability > 0 || sp.min_margin > 0) {
+            rules = true;
+            const bool abstain = p < sp.min_probability || (tree && margin < sp.min_margin);
+            f["abstain"] = abstain;
+            if (abstain) {
+                abstained.push_back(sp.name);
+            }
+        }
+        fields[sp.name] = f;
     }
     common_json out = common_json::object();
     out["decision"] = decision;
     out["fields"]   = fields;
+    if (rules) {
+        out["abstained"] = abstained;
+    }
     return out;
 }
-
 } // namespace llama_decision
