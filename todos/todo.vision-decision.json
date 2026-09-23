@@ -52,7 +52,7 @@
         "VD-002",
         "VD-003"
       ],
-      "status": "partial"
+      "status": "done"
     },
     {
       "id": "VD-M1",
@@ -71,7 +71,7 @@
         "VD-021",
         "VD-022"
       ],
-      "status": "todo"
+      "status": "partial"
     },
     {
       "id": "VD-M3",
@@ -87,7 +87,7 @@
         "VD-037",
         "VD-038"
       ],
-      "status": "todo"
+      "status": "partial"
     },
     {
       "id": "VD-M4",
@@ -100,7 +100,7 @@
         "VD-044",
         "VD-050"
       ],
-      "status": "todo"
+      "status": "partial"
     }
   ],
   "tasks": [
@@ -156,13 +156,13 @@
       "milestone_id": "VD-M0",
       "title": "Build und Baseline",
       "type": "test",
-      "status": "partial",
+      "status": "done",
       "priority": "P0",
       "risk": "medium",
       "depends_on": [
         "VD-002"
       ],
-      "progress_percent": 70,
+      "progress_percent": 100,
       "implementation": [
         "CPU-Release-Build von llama-server und llama-parallel-decision.",
         "Text-only /v1/decision Baseline mit festem Modell/Request aufzeichnen (Werte und Wahrscheinlichkeiten).",
@@ -173,9 +173,10 @@
         "Bestehende Tests laufen gruen oder Abweichungen sind dokumentiert."
       ],
       "evidence": [
-        "build log: cmake --build ... BUILD_EXIT=0"
+        "build log: cmake --build ... BUILD_EXIT=0",
+        "scratchpad upstream_base.txt / upstream_new.txt"
       ],
-      "implementation_note": "Build ok; Baseline-Binaries gesichert; Text-Baseline auf tinygemma3 aufgezeichnet. Offen: bestehende Server-Tests (test_vision_api, test_basic) laufen lassen."
+      "implementation_note": "Upstream test_vision_api + test_basic auf freiem Port mit gefuelltem Test-Cache: Baseline 25/26, neu 25/26 (einziger Fehler test_load_split_model braucht Netz, auch in der Baseline). Ein IMG_URL-Fall war einmal flaky (Download), 2x Wiederholung gruen auf beiden Builds."
     },
     {
       "id": "VD-010",
@@ -188,7 +189,7 @@
       "depends_on": [
         "VD-002"
       ],
-      "progress_percent": 80,
+      "progress_percent": 90,
       "implementation": [
         "context_input einfuehren: Text-Tokens (Engine dekodiert gepackt wie bisher) oder Prefill-Callback (Aufrufer fuellt die Trunk-Sequenz ab pos0 und liefert pos_next).",
         "Branch-Positionen aus pos_next pro Trunk statt aus der Tokenanzahl ableiten.",
@@ -202,21 +203,21 @@
       "evidence": [
         "tools/parallel-decision/decision-engine.{h,cpp}"
       ],
-      "implementation_note": "context_input (Text oder Prefill-Callback) + pos_next pro Trunk + pool_guard fuer Fehlerpfade umgesetzt; Engine ohne mtmd. Offen: Nachweis mit M-RoPE-Kontext (VD-022)."
+      "implementation_note": "Umgesetzt + max_group-Option. Offen nur: Nachweis M-RoPE (Qwen2.5-VL)."
     },
     {
       "id": "VD-011",
       "milestone_id": "VD-M1",
       "title": "Text-only Regression bitgenau",
       "type": "test",
-      "status": "partial",
+      "status": "done",
       "priority": "P0",
       "risk": "medium",
       "depends_on": [
         "VD-003",
         "VD-010"
       ],
-      "progress_percent": 60,
+      "progress_percent": 100,
       "implementation": [
         "Baseline-Request aus VD-003 nach dem Refactor erneut ausfuehren und Werte/Wahrscheinlichkeiten vergleichen."
       ],
@@ -225,22 +226,23 @@
         "Automatisierter Test in tools/server/tests/unit/test_decision.py deckt Text-only ab."
       ],
       "evidence": [
-        "scratchpad regress/run_text.py + compare.py: mismatches 0"
+        "scratchpad regress/run_text.py + compare.py: mismatches 0",
+        "unit/test_decision.py::test_decision_text"
       ],
-      "implementation_note": "Alter vs neuer Server (tinygemma3, 6 Requests: tree/greedy/auto, multi-context, cache warm/kalt, Fehlerfall): 0 Abweichungen bei Toleranz 0. Offen: automatisierter Test in test_decision.py."
+      "implementation_note": "Bitgenau (Toleranz 0) alt vs neu, mit und ohne mmproj; test_decision.py::test_decision_text deckt Text-only inkl. Prefix-Cache ab."
     },
     {
       "id": "VD-020",
       "milestone_id": "VD-M2",
       "title": "Server: multimodale contexts parsen (OpenAI content parts)",
       "type": "feature",
-      "status": "todo",
+      "status": "done",
       "priority": "P0",
       "risk": "medium",
       "depends_on": [
         "VD-010"
       ],
-      "progress_percent": 0,
+      "progress_percent": 100,
       "implementation": [
         "contexts[i] darf String (unveraendert) oder Array aus {type:text}/{type:image_url} Parts sein.",
         "Medien ueber vorhandenes handle_media laden (URL-Limits, --media-path, data-URI, base64).",
@@ -250,20 +252,24 @@
         "Kein zweiter Medienlader; handle_media wird wiederverwendet.",
         "Fehlerfaelle (kein mmproj, kaputtes Bild, falscher Part-Typ) liefern HTTP 400 mit klarer Meldung."
       ],
-      "evidence": []
+      "evidence": [
+        "tools/server/server-context.cpp decision_context_text",
+        "unit/test_decision.py::test_decision_vision_errors, ::test_decision_vision_without_mmproj"
+      ],
+      "implementation_note": "contexts[i] als String oder text/image_url-Parts; handle_media wiederverwendet (URL-Limits, --media-path, data-URI, base64); Medienfehler -> 400; ohne mmproj -> 400 mit Hinweis."
     },
     {
       "id": "VD-021",
       "milestone_id": "VD-M2",
       "title": "Server: multimodaler Prefill ueber libmtmd in die Trunk-Sequenz",
       "type": "feature",
-      "status": "todo",
+      "status": "partial",
       "priority": "P0",
       "risk": "high",
       "depends_on": [
         "VD-020"
       ],
-      "progress_percent": 0,
+      "progress_percent": 90,
       "implementation": [
         "Gerenderten Tail per mtmd_tokenize in Chunks zerlegen (add_special nur ohne Shared-Prefix).",
         "Text-Chunks dekodieren, Medien-Chunks per mtmd_encode/mtmd_batch encodieren und mit mtmd_helper_decode_image_chunk auf die Trunk-Sequenz dekodieren.",
@@ -273,7 +279,10 @@
         "Kein eigener Vision-Stack; nur libmtmd-API.",
         "Normaler multimodaler Chat (test_vision_api.py) bleibt gruen."
       ],
-      "evidence": []
+      "evidence": [
+        "unit/test_decision.py::test_decision_vision_matches_completion"
+      ],
+      "implementation_note": "Prefill ueber mtmd_tokenize + mtmd_helper_eval_chunk_single (Text) + eigenes mtmd_batch + mtmd_helper_decode_image_chunk (Medien); pos_next aus n_pos. Nicht-kausale Medien: ub-Pruefung + max_group=1 (Upstream-Layoutabhaengigkeit, AGENT.md). Offen: Upstream-Vision-Tests nach finalem Stand erneut."
     },
     {
       "id": "VD-022",
@@ -302,33 +311,34 @@
       "milestone_id": "VD-M3",
       "title": "Multi-Image pro Kontext",
       "type": "feature",
-      "status": "todo",
+      "status": "partial",
       "priority": "P1",
       "risk": "medium",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 70,
       "implementation": [
         "Mehrere image_url Parts in einem Kontext; Reihenfolge von Text und Bildern bleibt erhalten."
       ],
       "acceptance_criteria": [
         "Test mit 2 Bildern in einem Kontext liefert korrekte Positionen (Aequivalenztest)."
       ],
-      "evidence": []
+      "evidence": [],
+      "implementation_note": "Mehrere Bilder pro Kontext laufen (Aequivalenztest [0,1] auf tinygemma3). Offen: Beleg mit M-RoPE-Modell."
     },
     {
       "id": "VD-031",
       "milestone_id": "VD-M3",
       "title": "Multi-Context-Batching mit Bildern",
       "type": "feature",
-      "status": "todo",
+      "status": "partial",
       "priority": "P1",
       "risk": "high",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 50,
       "implementation": [
         "Mehrere multimodale Kontexte in einem Request; Bild-Encodes kontextuebergreifend ueber mtmd_batch buendeln, wo das Modell es erlaubt.",
         "Ergebnisreihenfolge bleibt erhalten."
@@ -337,7 +347,10 @@
         "Batch-Ergebnisse identisch zu Einzel-Requests.",
         "Encode-Batching messbar (Timing) oder begruendet nicht moeglich."
       ],
-      "evidence": []
+      "evidence": [
+        "unit/test_decision.py::test_decision_vision_batch_and_modes"
+      ],
+      "implementation_note": "Multi-Context mit Bildern: Batch == Einzel bitgenau (tinygemma3); Encode-Batching per mtmd_batch-Lookahead ueber Kontexte. Offen: Timing-Beleg, M-RoPE-Modell."
     },
     {
       "id": "VD-032",
@@ -409,20 +422,21 @@
       "milestone_id": "VD-M3",
       "title": "Tree- und Greedy-Decisions mit Vision",
       "type": "test",
-      "status": "todo",
+      "status": "partial",
       "priority": "P1",
       "risk": "medium",
       "depends_on": [
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 50,
       "implementation": [
         "Beide Modi auf multimodalen Trunks testen; grosse Felder (>tree_max) greedy."
       ],
       "acceptance_criteria": [
         "Tree und Greedy liefern bei eindeutigen Feldern denselben Gewinner; Test vorhanden."
       ],
-      "evidence": []
+      "evidence": [],
+      "implementation_note": "Greedy und Tree auf Bild-Trunk laufen; Test prueft gleichen Gewinner. Offen: M-RoPE-Modell."
     },
     {
       "id": "VD-036",
@@ -473,14 +487,14 @@
       "milestone_id": "VD-M3",
       "title": "Security und Ressourcenlimits",
       "type": "security",
-      "status": "todo",
+      "status": "partial",
       "priority": "P0",
       "risk": "high",
       "depends_on": [
         "VD-020",
         "VD-032"
       ],
-      "progress_percent": 0,
+      "progress_percent": 30,
       "implementation": [
         "Limits: Bilder pro Request, Bilder gesamt, Bild-Tokens gesamt, Kontexte; vorhandene Medienregeln (Remote-Limits, --media-path) wiederverwenden.",
         "Medien nur in contexts, nicht in instructions/schema.",
@@ -490,7 +504,8 @@
         "Jedes Limit hat einen Test oder einen reproduzierbaren curl-Beleg.",
         "Nach einem Fehler funktionieren folgende Requests normal."
       ],
-      "evidence": []
+      "evidence": [],
+      "implementation_note": "pool_guard raeumt Sequenzen bei Fehlern; Folge-Request nach Fehler getestet; Medien nur in contexts. Offen: Limits (Anzahl Medien, Tokenbudget)."
     },
     {
       "id": "VD-040",
@@ -520,14 +535,14 @@
       "milestone_id": "VD-M4",
       "title": "Regressionstests",
       "type": "test",
-      "status": "todo",
+      "status": "partial",
       "priority": "P0",
       "risk": "medium",
       "depends_on": [
         "VD-011",
         "VD-022"
       ],
-      "progress_percent": 0,
+      "progress_percent": 60,
       "implementation": [
         "tools/server/tests/unit/test_decision.py: Text-only, Vision (tinygemma3), Fehlerfaelle, Limits.",
         "Keine neuen Dateien in tests/ (AGENTS.md)."
@@ -535,7 +550,10 @@
       "acceptance_criteria": [
         "pytest gruen lokal; laeuft ohne GPU in wenigen Minuten."
       ],
-      "evidence": []
+      "evidence": [
+        "tools/server/tests/unit/test_decision.py"
+      ],
+      "implementation_note": "test_decision.py: 12 Tests gruen (Text, Vision-Aequivalenz, Batch/Modi, Fehler, ohne mmproj, deaktiviert). Offen: Limits, Cache."
     },
     {
       "id": "VD-042",
@@ -634,13 +652,13 @@
   "tasks_status_summary": {
     "total": 23,
     "by_status": {
-      "todo": 18,
+      "todo": 11,
       "in_progress": 0,
-      "partial": 3,
+      "partial": 7,
       "blocked": 0,
-      "done": 2
+      "done": 5
     },
-    "progress_percent_done": 8.7,
+    "progress_percent_done": 21.7,
     "by_priority": {
       "P0": 12,
       "P1": 8,
@@ -655,16 +673,16 @@
     },
     "critical_path": {
       "total": 6,
-      "done": 0,
-      "remaining": 6
+      "done": 1,
+      "remaining": 5
     },
     "milestones": {
       "total": 5,
-      "todo": 3,
+      "todo": 0,
       "in_progress": 0,
-      "partial": 2,
+      "partial": 4,
       "blocked": 0,
-      "done": 0
+      "done": 1
     }
   },
   "log": [
@@ -703,6 +721,66 @@
       "task": "VD-003",
       "progress": "70",
       "note": "Build ok; Baseline-Binaries gesichert; Text-Baseline auf tinygemma3 aufgezeichnet. Offen: bestehende Server-Tests (test_vision_api, test_basic) laufen lassen."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-003",
+      "progress": "100",
+      "note": "Upstream test_vision_api + test_basic auf freiem Port mit gefuelltem Test-Cache: Baseline 25/26, neu 25/26 (einziger Fehler test_load_split_model braucht Netz, auch in der Baseline). Ein IMG_URL-Fall war einmal flaky (Download), 2x Wiederholung gruen auf beiden Builds."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-011",
+      "progress": "100",
+      "note": "Bitgenau (Toleranz 0) alt vs neu, mit und ohne mmproj; test_decision.py::test_decision_text deckt Text-only inkl. Prefix-Cache ab."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-020",
+      "progress": "100",
+      "note": "contexts[i] als String oder text/image_url-Parts; handle_media wiederverwendet (URL-Limits, --media-path, data-URI, base64); Medienfehler -> 400; ohne mmproj -> 400 mit Hinweis."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-021",
+      "progress": "90",
+      "note": "Prefill ueber mtmd_tokenize + mtmd_helper_eval_chunk_single (Text) + eigenes mtmd_batch + mtmd_helper_decode_image_chunk (Medien); pos_next aus n_pos. Nicht-kausale Medien: ub-Pruefung + max_group=1 (Upstream-Layoutabhaengigkeit, AGENT.md). Offen: Upstream-Vision-Tests nach finalem Stand erneut."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-030",
+      "progress": "70",
+      "note": "Mehrere Bilder pro Kontext laufen (Aequivalenztest [0,1] auf tinygemma3). Offen: Beleg mit M-RoPE-Modell."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-031",
+      "progress": "50",
+      "note": "Multi-Context mit Bildern: Batch == Einzel bitgenau (tinygemma3); Encode-Batching per mtmd_batch-Lookahead ueber Kontexte. Offen: Timing-Beleg, M-RoPE-Modell."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-035",
+      "progress": "50",
+      "note": "Greedy und Tree auf Bild-Trunk laufen; Test prueft gleichen Gewinner. Offen: M-RoPE-Modell."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-038",
+      "progress": "30",
+      "note": "pool_guard raeumt Sequenzen bei Fehlern; Folge-Request nach Fehler getestet; Medien nur in contexts. Offen: Limits (Anzahl Medien, Tokenbudget)."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-041",
+      "progress": "60",
+      "note": "test_decision.py: 12 Tests gruen (Text, Vision-Aequivalenz, Batch/Modi, Fehler, ohne mmproj, deaktiviert). Offen: Limits, Cache."
+    },
+    {
+      "date": "2026-09-23",
+      "task": "VD-010",
+      "progress": "90",
+      "note": "Umgesetzt + max_group-Option. Offen nur: Nachweis M-RoPE (Qwen2.5-VL)."
     }
   ],
   "tasks_type_summary": {
@@ -742,34 +820,34 @@
       },
       "test": {
         "total": 7,
-        "done": 0,
+        "done": 2,
         "partial": 2,
         "blocked": 0,
-        "todo": 5,
+        "todo": 3,
         "in_progress": 0,
-        "progress_percent": 18.6,
+        "progress_percent": 44.3,
         "by_status": {
-          "todo": 5,
+          "todo": 3,
           "in_progress": 0,
           "partial": 2,
           "blocked": 0,
-          "done": 0
+          "done": 2
         }
       },
       "feature": {
         "total": 9,
-        "done": 0,
-        "partial": 1,
+        "done": 1,
+        "partial": 4,
         "blocked": 0,
-        "todo": 8,
+        "todo": 4,
         "in_progress": 0,
-        "progress_percent": 8.9,
+        "progress_percent": 44.4,
         "by_status": {
-          "todo": 8,
+          "todo": 4,
           "in_progress": 0,
-          "partial": 1,
+          "partial": 4,
           "blocked": 0,
-          "done": 0
+          "done": 1
         }
       },
       "performance": {
@@ -791,15 +869,15 @@
       "security": {
         "total": 1,
         "done": 0,
-        "partial": 0,
+        "partial": 1,
         "blocked": 0,
-        "todo": 1,
+        "todo": 0,
         "in_progress": 0,
-        "progress_percent": 0.0,
+        "progress_percent": 30.0,
         "by_status": {
-          "todo": 1,
+          "todo": 0,
           "in_progress": 0,
-          "partial": 0,
+          "partial": 1,
           "blocked": 0,
           "done": 0
         }
@@ -840,12 +918,12 @@
   },
   "progress_summary": {
     "state": "partial",
-    "todo_remaining": 18,
+    "todo_remaining": 11,
     "in_progress": 0,
-    "partial": 3,
+    "partial": 7,
     "blocked": 0,
-    "done": 2,
-    "milestones_done": 0,
+    "done": 5,
+    "milestones_done": 1,
     "milestones_total": 5
   }
 }

@@ -52,6 +52,20 @@ ggml-org/llama.cpp (master)           remote: upstream-main       (fetch only)
 | media marker | random per process unless `LLAMA_MEDIA_MARKER` is set, so user text cannot inject media | `tools/server/server-common.cpp`, `get_media_marker` |
 | media loading | `handle_media`: http(s) (10 MB, 10 s), `file://` only under `--media-path`, `data:` URIs, raw base64 | `server-common.cpp` |
 | server image batching | `mtmd_batch_add_chunk` / `mtmd_batch_encode` encode several images at once, then `mtmd_helper_decode_image_chunk` decodes each | `server-context.cpp`, `process_mtmd_chunk` |
+| mtmd buffers | an `mtmd_batch` owns its output embeddings; `mtmd_encode_chunk` writes `ctx->out_embd`; a decision batch does not touch slot batches | `tools/mtmd/mtmd.cpp` |
+| slice ids | all slices of one image share the bitmap id (`split_batch_to_chunk`), so a cache key needs the slice index too | `tools/mtmd/mtmd.cpp` |
+| non-causal layout | a non-causal image decode (Gemma 3) gives different numbers when the sequence's cells are split by cells of other sequences; causal decodes are layout-invariant. Upstream, see below | slot-path repro |
+| engine vs slot numerics | tinygemma3 on CPU: the text-only engine already differs from `/completion` by up to ~6e-3 on the same prompt, FA on/off by ~4e-2; tight equivalence checks need a real model | `unit/test_decision.py` |
+
+### Upstream finding: non-causal image decode depends on the KV cell layout
+
+Reproduced with plain `/completion` slots, no decision code: `llama-server -hf ggml-org/tinygemma3-GGUF:Q8_0 -np 2 --kv-unified --no-cache-idle-slots --cache-ram 0 -fa off -ctk f32 -ctv f32`.
+
+1. slot 1: `/completion` with the text before the image (`cache_prompt: true`);
+2. slot 0: any long text prompt (`cache_prompt: true`), which puts its cells after slot 1's;
+3. slot 1: the full multimodal prompt (`cache_prompt: true`): the text is reused, the image lands behind slot 0's cells.
+
+The next-token logprobs differ from a fresh run by ~1e-2 (f32 KV, no FA). Without step 2 they are bit-identical, and a text-only continuation over the same gap is bit-identical too. `/decision` avoids this by deciding contexts with non-causal media one at a time (`options::max_group = 1`). Report upstream only through a human-written issue.
 
 ## Architecture of the change
 
