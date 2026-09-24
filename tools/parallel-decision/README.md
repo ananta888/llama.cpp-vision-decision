@@ -179,18 +179,60 @@ Contexts in flight are grouped so that they fit together.
 
 ## Calibration and abstain
 
-A schema-valid answer is not a correct answer. Every value comes with a probability, and two knobs help to act on it:
+A schema-valid answer is not a correct answer, and a raw `probability` is not the chance of being right (SmolVLM
+answers `dark_background` at chance with 0.89 mean confidence). Two knobs turn it into a usable confidence:
 
 - `temperature` rescales a tree field's value distribution as `p(value)^(1/T)`, renormalised (greedy fields scale each
-  step). Fit it on labelled data with `bench/evaluate.py`, which reports accuracy, NLL and ECE per field and the
-  temperature that minimises NLL.
+  step).
 - `abstain` marks a field as uncertain when its probability is below `min_probability` or its margin below
   `min_margin`. The field keeps its most likely value, gets `"abstain": true`, and the result lists it in `abstained`,
-  so the caller can fall back (ask a larger model, a human, or a chat completion).
+  so the caller can fall back (a larger model, a human, a chat completion).
 
-```json
-"abstain": {"min_probability": 0.8, "min_margin": 0.3}
+Both are per field and per model, and they should come from labelled data of the real use case, not be guessed.
+`bench/evaluate.py` does that:
+
+```bash
+# 1. score a labelled set once and keep the outputs
+python3 bench/evaluate.py train/ --url http://127.0.0.1:8096 --dump train-rows.json
+# 2. per field: fit T, pick the lowest threshold whose accepted answers reach the target accuracy, with a 95% lower
+#    bound (Wilson); cross-validated. Groups of another field's predicted value that miss the target become
+#    escalation rules. Writes a ready schema and the rules.
+python3 bench/evaluate.py train/ --from train-rows.json --target-accuracy 0.95 --confidence-level 0.95 \
+    --group-by shape,color,count --schema-out calibrated.json --rules-out rules.json
+# 3. check on data the calibration has not seen
+python3 bench/evaluate.py holdout/ --url http://127.0.0.1:8096 --dump holdout-rows.json
+python3 bench/evaluate.py holdout/ --from holdout-rows.json --check calibrated.json --rules rules.json --target-accuracy 0.95
 ```
+
+Send `calibrated.json` as the schema and escalate every field in `abstained` and every field a rule in `rules.json`
+matches (a rule tests the model's answer for another field, e.g. escalate `count` when `shape` is `square`).
+
+Result on `shapes.py` images (160 to calibrate, 160 new ones to check, 20% empty images whose answer is `unknown`,
+target 95% at a 95% lower bound):
+
+| model | field | threshold | held-out accuracy of accepted answers | held-out coverage |
+|---|---|---|---|---|
+| Qwen3-VL-2B Q8_0 | shape | 0.9999 | 1.000 | 1.00 |
+| Qwen3-VL-2B Q8_0 | color | 0.9999 | 1.000 | 1.00 |
+| Qwen3-VL-2B Q8_0 | count, no rule | 0.9212 | 0.931 | 0.82 |
+| Qwen3-VL-2B Q8_0 | count, rule "shape = square" | 0.9212 | 1.000 | 0.62 |
+| Qwen3-VL-2B Q8_0 | dark_background | 0.9316 | 0.991 | 0.72 |
+| SmolVLM-500M Q8_0 | shape | 0.837 | 0.975 | 0.51 |
+| SmolVLM-500M Q8_0 | color | 0.7733 | 1.000 | 1.00 |
+| SmolVLM-500M Q8_0 | count, dark_background | none reaches the target | escalated | 0.00 |
+
+What this shows:
+
+- Thresholds hold on new data when the errors are uncertain ones.
+- Calibration cannot catch errors the model makes with high confidence: Qwen3-VL counts three squares as two with
+  0.95-0.996. Only the group report finds them (`shape=square` below the target already on the calibration set), and
+  the rule fixes it at the cost of coverage.
+- Small sets cannot certify high targets: 160 perfect answers give a 95% lower bound of 0.977, so a 98% target needs
+  about 200 or more labelled examples per field. `evaluate.py` then refuses a threshold instead of promising too much.
+- Offer an "unknown" value in enums (and `0` in counts) so the model can say that the image does not answer the
+  question; it must occur in the labelled data too.
+
+Raw reports, schemas and rules: `bench/results/calibration/`.
 
 ## Supported vision models
 

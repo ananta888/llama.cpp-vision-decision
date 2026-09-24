@@ -1,0 +1,119 @@
+{
+ "n": 160,
+ "wall_s": 0.0,
+ "mean_per_decision_ms": 2821.3,
+ "fields": {
+  "shape": {
+   "accuracy": 0.725,
+   "mean_confidence": 0.7788,
+   "nll": 0.4604,
+   "ece": 0.1976,
+   "fitted_temperature": 0.967,
+   "nll_fitted": 0.4603,
+   "ece_fitted": 0.1977,
+   "calibration": {
+    "temperature": 0.967,
+    "threshold": 0.7803,
+    "cv_accepted_accuracy": 0.9524,
+    "cv_coverage": 0.525,
+    "accepted_accuracy": 0.9529,
+    "coverage": 0.5312,
+    "usable": true
+   },
+   "check": {
+    "temperature": 0.932,
+    "threshold": 0.837,
+    "accepted_accuracy": 0.9753,
+    "coverage": 0.5062,
+    "with_rules": {
+     "accepted_accuracy": 0.9753,
+     "coverage": 0.5062
+    }
+   }
+  },
+  "color": {
+   "accuracy": 1.0,
+   "mean_confidence": 0.9172,
+   "nll": 0.1069,
+   "ece": 0.0828,
+   "fitted_temperature": 0.25,
+   "nll_fitted": 0.0223,
+   "ece_fitted": 0.0202,
+   "calibration": {
+    "temperature": 0.25,
+    "threshold": 0.7733,
+    "cv_accepted_accuracy": 1.0,
+    "cv_coverage": 1.0,
+    "accepted_accuracy": 1.0,
+    "coverage": 1.0,
+    "usable": true
+   },
+   "check": {
+    "temperature": 0.25,
+    "threshold": 0.7733,
+    "accepted_accuracy": 1.0,
+    "coverage": 1.0,
+    "with_rules": {
+     "accepted_accuracy": 1.0,
+     "coverage": 1.0
+    }
+   }
+  },
+  "count": {
+   "accuracy": 0.8125,
+   "mean_confidence": 0.8544,
+   "nll": 0.3688,
+   "ece": 0.0826,
+   "fitted_temperature": 0.967,
+   "nll_fitted": 0.3685,
+   "ece_fitted": 0.0709,
+   "calibration": {
+    "temperature": 0.967,
+    "threshold": 0.8541,
+    "cv_accepted_accuracy": 0.949,
+    "cv_coverage": 0.6125,
+    "accepted_accuracy": 0.95,
+    "coverage": 0.625,
+    "usable": true
+   },
+   "check": {
+    "temperature": 1.004,
+    "threshold": 1.0,
+    "accepted_accuracy": null,
+    "coverage": 0.0,
+    "with_rules": {
+     "accepted_accuracy": null,
+     "coverage": 0.0
+    }
+   }
+  },
+  "dark_background": {
+   "accuracy": 0.4562,
+   "mean_confidence": 0.8803,
+   "nll": 1.1734,
+   "ece": 0.424,
+   "fitted_temperature": 10.0,
+   "nll_fitted": 0.6974,
+   "ece_fitted": 0.0966,
+   "calibration": {
+    "temperature": 10.0,
+    "threshold": 0.5742,
+    "cv_accepted_accuracy": 0.875,
+    "cv_coverage": 0.1,
+    "accepted_accuracy": 1.0,
+    "coverage": 0.0875,
+    "usable": true
+   },
+   "check": {
+    "temperature": 10.0,
+    "threshold": 1.0,
+    "accepted_accuracy": null,
+    "coverage": 0.0,
+    "with_rules": {
+     "accepted_accuracy": null,
+     "coverage": 0.0
+    }
+   }
+  }
+ }
+}

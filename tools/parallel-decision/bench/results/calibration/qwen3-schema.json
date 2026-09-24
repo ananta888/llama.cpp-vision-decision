@@ -1,0 +1,49 @@
+{
+ "shape": {
+  "type": "enum",
+  "choices": [
+   "circle",
+   "square",
+   "triangle",
+   "unknown"
+  ],
+  "description": "Which shape is drawn? unknown if there is no shape.",
+  "temperature": 0.25,
+  "abstain": {
+   "min_probability": 0.9999
+  }
+ },
+ "color": {
+  "type": "enum",
+  "choices": [
+   "red",
+   "green",
+   "blue",
+   "yellow",
+   "unknown"
+  ],
+  "description": "What colour are the shapes? unknown if there is no shape.",
+  "temperature": 0.25,
+  "abstain": {
+   "min_probability": 0.9999
+  }
+ },
+ "count": {
+  "type": "integer",
+  "minimum": 0,
+  "maximum": 4,
+  "description": "How many shapes are there?",
+  "temperature": 1.51,
+  "abstain": {
+   "min_probability": 0.9212
+  }
+ },
+ "dark_background": {
+  "type": "boolean",
+  "description": "Is the background dark?",
+  "temperature": 1.428,
+  "abstain": {
+   "min_probability": 0.9316
+  }
+ }
+}

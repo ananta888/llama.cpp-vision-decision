@@ -2,7 +2,7 @@
   "$schema": "https://ananta.local/schemas/todo.track.schema.json",
   "version": "1.0",
   "created": "2026-09-23",
-  "updated_at": "2026-09-23",
+  "updated_at": "2026-09-24",
   "owner": "Peter Stuiber / Ananta",
   "track": "llama_cpp_vision_decision",
   "title": "llama.cpp vision-decision: direkte multimodale Schema-Entscheidungen ueber /v1/decision",
@@ -99,6 +99,17 @@
         "VD-043",
         "VD-044",
         "VD-050"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "VD-M5",
+      "title": "Kalibrierte Konfidenz: Unknown, Schwellen, Holdout-Nachweis",
+      "task_ids": [
+        "VD-060",
+        "VD-061",
+        "VD-062",
+        "VD-063"
       ],
       "status": "done"
     }
@@ -688,6 +699,102 @@
         "final_tests: 42 passed"
       ],
       "implementation_note": "Qwen3-VL-2B ueber llama-server: 2 Bilder direkt + 1 Text in einem Request, je 4 typisierte Felder aus einem multimodalen KV-Kontext, alle Bildantworten korrekt, Probability + Timings, Cache warm 6.8s -> 3.3s, Tree == Greedy; 42 Tests gruen; Benchmarks und Doku vorhanden."
+    },
+    {
+      "id": "VD-060",
+      "milestone_id": "VD-M5",
+      "title": "Unknown-Antwort im Testdatensatz",
+      "type": "feature",
+      "status": "done",
+      "priority": "P1",
+      "risk": "low",
+      "depends_on": [
+        "VD-036"
+      ],
+      "progress_percent": 100,
+      "implementation": [
+        "shapes.py: optional Bilder ohne Formen; Enums bekommen \"unknown\", count beginnt bei 0."
+      ],
+      "acceptance_criteria": [
+        "Datensatz mit --unknown-rate erzeugbar; Labels und Schema konsistent."
+      ],
+      "evidence": [
+        "tools/parallel-decision/bench/shapes.py"
+      ],
+      "implementation_note": "shapes.py --unknown-rate: leere Bilder, Enums mit unknown, count ab 0; Standardausgabe (Seed 1) byte-identisch zu vorher."
+    },
+    {
+      "id": "VD-061",
+      "milestone_id": "VD-M5",
+      "title": "Schwellen pro Feld nach Zielgenauigkeit (kreuzvalidiert)",
+      "type": "feature",
+      "status": "done",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [
+        "VD-036",
+        "VD-060"
+      ],
+      "progress_percent": 100,
+      "implementation": [
+        "evaluate.py --target-accuracy: pro Feld Temperatur fitten und kleinste Schwelle waehlen, bei der akzeptierte Antworten das Ziel erreichen; k-fach kreuzvalidiert.",
+        "Export eines kalibrierten Schemas mit temperature und abstain.min_probability pro Feld; unbrauchbare Felder markieren."
+      ],
+      "acceptance_criteria": [
+        "Report enthaelt pro Feld T, Schwelle, CV-Genauigkeit der akzeptierten Antworten und CV-Abdeckung.",
+        "Exportiertes Schema ist direkt als /v1/decision-Schema nutzbar."
+      ],
+      "evidence": [
+        "tools/parallel-decision/bench/evaluate.py"
+      ],
+      "implementation_note": "evaluate.py: Temperatur-Fit (0.25..10), Schwelle pro Feld nach Zielgenauigkeit mit Wilson-Untergrenze (--confidence-level), k-fach CV, Gleichstands-Fehler behoben, Gruppenbericht nach vorhergesagten Werten, Eskalationsregeln (--rules-out), Schema-Export, Offline-Check (--check/--rules) == Serverergebnis (exakt verglichen)."
+    },
+    {
+      "id": "VD-062",
+      "milestone_id": "VD-M5",
+      "title": "Holdout-Nachweis der kalibrierten Konfidenz",
+      "type": "test",
+      "status": "done",
+      "priority": "P0",
+      "risk": "medium",
+      "depends_on": [
+        "VD-061"
+      ],
+      "progress_percent": 100,
+      "implementation": [
+        "Kalibriertes Schema auf frisch erzeugtem Datensatz (anderer Seed) mit Qwen3-VL ausfuehren."
+      ],
+      "acceptance_criteria": [
+        "Akzeptierte Genauigkeit auf dem Holdout liegt im Rahmen des Ziels; Abdeckung und Eskalationsquote dokumentiert."
+      ],
+      "evidence": [
+        "bench/results/calibration/qwen3-holdout-check.json",
+        "bench/results/calibration/smolvlm-holdout-check.json"
+      ],
+      "implementation_note": "Holdout (160 neue Bilder, anderer Seed): Qwen3-VL alle 4 Felder >= 95% (shape/color 100%, count mit Regel shape=square 100% bei 62% Abdeckung, dark_background 99.1%); ohne Regel count 93.1% -> systematischer sicherer Fehler (3 Quadrate als 2) dokumentiert. SmolVLM: shape 97.5%, color 100%, count/dark_background nicht zertifizierbar -> immer eskaliert."
+    },
+    {
+      "id": "VD-063",
+      "milestone_id": "VD-M5",
+      "title": "Doku und Ananta-Uebergabe der Kalibrierung",
+      "type": "documentation",
+      "status": "done",
+      "priority": "P1",
+      "risk": "low",
+      "depends_on": [
+        "VD-062"
+      ],
+      "progress_percent": 100,
+      "implementation": [
+        "README-Abschnitt zum Kalibrierungs-Workflow; Hinweise fuer Ananta."
+      ],
+      "acceptance_criteria": [
+        "Workflow reproduzierbar beschrieben mit echten Zahlen."
+      ],
+      "evidence": [
+        "tools/parallel-decision/README.md#calibration-and-abstain"
+      ],
+      "implementation_note": "README-Abschnitt 'Calibration and abstain' mit Workflow, Holdout-Tabelle und Grenzen."
     }
   ],
   "critical_path_tasks": [
@@ -696,42 +803,44 @@
     "VD-021",
     "VD-022",
     "VD-041",
-    "VD-050"
+    "VD-050",
+    "VD-061",
+    "VD-062"
   ],
   "tasks_status_summary": {
-    "total": 23,
+    "total": 27,
     "by_status": {
       "todo": 0,
       "in_progress": 0,
       "partial": 0,
       "blocked": 0,
-      "done": 23
+      "done": 27
     },
     "progress_percent_done": 100.0,
     "by_priority": {
-      "P0": 12,
-      "P1": 8,
+      "P0": 14,
+      "P1": 10,
       "P2": 3,
       "P3": 0
     },
     "by_risk": {
-      "low": 4,
-      "medium": 12,
+      "low": 6,
+      "medium": 14,
       "high": 7,
       "critical": 0
     },
     "critical_path": {
-      "total": 6,
-      "done": 6,
+      "total": 8,
+      "done": 8,
       "remaining": 0
     },
     "milestones": {
-      "total": 5,
+      "total": 6,
       "todo": 0,
       "in_progress": 0,
       "partial": 0,
       "blocked": 0,
-      "done": 5
+      "done": 6
     }
   },
   "log": [
@@ -956,14 +1065,38 @@
       "task": "VD-050",
       "progress": "100",
       "note": "Qwen3-VL-2B ueber llama-server: 2 Bilder direkt + 1 Text in einem Request, je 4 typisierte Felder aus einem multimodalen KV-Kontext, alle Bildantworten korrekt, Probability + Timings, Cache warm 6.8s -> 3.3s, Tree == Greedy; 42 Tests gruen; Benchmarks und Doku vorhanden."
+    },
+    {
+      "date": "2026-09-24",
+      "task": "VD-060",
+      "progress": "100",
+      "note": "shapes.py --unknown-rate: leere Bilder, Enums mit unknown, count ab 0; Standardausgabe (Seed 1) byte-identisch zu vorher."
+    },
+    {
+      "date": "2026-09-24",
+      "task": "VD-061",
+      "progress": "100",
+      "note": "evaluate.py: Temperatur-Fit (0.25..10), Schwelle pro Feld nach Zielgenauigkeit mit Wilson-Untergrenze (--confidence-level), k-fach CV, Gleichstands-Fehler behoben, Gruppenbericht nach vorhergesagten Werten, Eskalationsregeln (--rules-out), Schema-Export, Offline-Check (--check/--rules) == Serverergebnis (exakt verglichen)."
+    },
+    {
+      "date": "2026-09-24",
+      "task": "VD-062",
+      "progress": "100",
+      "note": "Holdout (160 neue Bilder, anderer Seed): Qwen3-VL alle 4 Felder >= 95% (shape/color 100%, count mit Regel shape=square 100% bei 62% Abdeckung, dark_background 99.1%); ohne Regel count 93.1% -> systematischer sicherer Fehler (3 Quadrate als 2) dokumentiert. SmolVLM: shape 97.5%, color 100%, count/dark_background nicht zertifizierbar -> immer eskaliert."
+    },
+    {
+      "date": "2026-09-24",
+      "task": "VD-063",
+      "progress": "100",
+      "note": "README-Abschnitt 'Calibration and abstain' mit Workflow, Holdout-Tabelle und Grenzen."
     }
   ],
   "tasks_type_summary": {
-    "total": 23,
+    "total": 27,
     "by_type": {
       "documentation": {
-        "total": 2,
-        "done": 2,
+        "total": 3,
+        "done": 3,
         "partial": 0,
         "blocked": 0,
         "todo": 0,
@@ -974,7 +1107,7 @@
           "in_progress": 0,
           "partial": 0,
           "blocked": 0,
-          "done": 2
+          "done": 3
         }
       },
       "research": {
@@ -994,8 +1127,8 @@
         }
       },
       "test": {
-        "total": 7,
-        "done": 7,
+        "total": 8,
+        "done": 8,
         "partial": 0,
         "blocked": 0,
         "todo": 0,
@@ -1006,12 +1139,12 @@
           "in_progress": 0,
           "partial": 0,
           "blocked": 0,
-          "done": 7
+          "done": 8
         }
       },
       "feature": {
-        "total": 9,
-        "done": 9,
+        "total": 11,
+        "done": 11,
         "partial": 0,
         "blocked": 0,
         "todo": 0,
@@ -1022,7 +1155,7 @@
           "in_progress": 0,
           "partial": 0,
           "blocked": 0,
-          "done": 9
+          "done": 11
         }
       },
       "performance": {
@@ -1097,8 +1230,8 @@
     "in_progress": 0,
     "partial": 0,
     "blocked": 0,
-    "done": 23,
-    "milestones_done": 5,
-    "milestones_total": 5
+    "done": 27,
+    "milestones_done": 6,
+    "milestones_total": 6
   }
 }

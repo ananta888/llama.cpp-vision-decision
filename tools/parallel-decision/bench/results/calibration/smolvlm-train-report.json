@@ -1,0 +1,449 @@
+{
+ "n": 160,
+ "wall_s": 0.0,
+ "mean_per_decision_ms": 1760.4,
+ "fields": {
+  "shape": {
+   "accuracy": 0.7063,
+   "mean_confidence": 0.7724,
+   "nll": 0.4565,
+   "ece": 0.1672,
+   "fitted_temperature": 0.932,
+   "nll_fitted": 0.4558,
+   "ece_fitted": 0.1689,
+   "calibration": {
+    "temperature": 0.932,
+    "threshold": 0.837,
+    "cv_accepted_accuracy": null,
+    "cv_coverage": 0.0,
+    "accepted_accuracy": 1.0,
+    "coverage": 0.5,
+    "usable": true
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 90,
+     "coverage": 0.478,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 12,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "shape=triangle": {
+     "n": 44,
+     "coverage": 0.841,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 14,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 0.533,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 0.636,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 0.655,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 0.727,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 63,
+     "coverage": 0.19,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 1,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 22,
+     "coverage": 0.682,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 26,
+     "coverage": 0.615,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 48,
+     "coverage": 0.75,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 160,
+     "coverage": 0.5,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    }
+   }
+  },
+  "color": {
+   "accuracy": 1.0,
+   "mean_confidence": 0.8833,
+   "nll": 0.1537,
+   "ece": 0.1167,
+   "fitted_temperature": 0.25,
+   "nll_fitted": 0.0401,
+   "ece_fitted": 0.0359,
+   "calibration": {
+    "temperature": 0.25,
+    "threshold": 0.7733,
+    "cv_accepted_accuracy": 1.0,
+    "cv_coverage": 1.0,
+    "accepted_accuracy": 1.0,
+    "coverage": 1.0,
+    "usable": true
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 90,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 12,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=triangle": {
+     "n": 44,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 14,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 63,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 1,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 22,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 26,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 48,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 160,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    }
+   }
+  },
+  "count": {
+   "accuracy": 0.7812,
+   "mean_confidence": 0.8265,
+   "nll": 0.4535,
+   "ece": 0.1161,
+   "fitted_temperature": 1.004,
+   "nll_fitted": 0.4534,
+   "ece_fitted": 0.1163,
+   "calibration": {
+    "temperature": 1.004,
+    "threshold": null,
+    "cv_accepted_accuracy": null,
+    "cv_coverage": 0.0,
+    "accepted_accuracy": null,
+    "coverage": 0.0,
+    "usable": false
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 90,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 12,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "shape=triangle": {
+     "n": 44,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 14,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 63,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 1,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 22,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 26,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 48,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 160,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    }
+   }
+  },
+  "dark_background": {
+   "accuracy": 0.4062,
+   "mean_confidence": 0.8769,
+   "nll": 1.2715,
+   "ece": 0.4706,
+   "fitted_temperature": 10.0,
+   "nll_fitted": 0.7087,
+   "ece_fitted": 0.1456,
+   "calibration": {
+    "temperature": 10.0,
+    "threshold": null,
+    "cv_accepted_accuracy": null,
+    "cv_coverage": 0.0,
+    "accepted_accuracy": null,
+    "coverage": 0.0,
+    "usable": false
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 90,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 12,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "shape=triangle": {
+     "n": 44,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 14,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 63,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 1,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 22,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 26,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 48,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 160,
+     "coverage": 0.0,
+     "accepted_accuracy": null,
+     "below_target": false
+    }
+   }
+  }
+ },
+ "schema_out": "/tmp/claude-1000/-home-krusty-llama-cpp-vision-decision/0ebf413e-89bf-4e00-b7d5-5f52cb217987/scratchpad/sm_schema.json",
+ "rules": []
+}

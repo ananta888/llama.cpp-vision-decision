@@ -8,6 +8,11 @@
 #   evaluate.py DIR --schema cal.json                             check a calibrated schema on new data: accuracy
 #                                                                  and coverage of the answers the server accepts
 #   --dump rows.json / --from rows.json                           keep the model outputs, re-run the analysis only
+#   --confidence-level 0.95                                       threshold on the Wilson lower bound of the accepted
+#                                                                  accuracy instead of its point estimate (small sets)
+#   --group-by shape                                              accepted accuracy per label group, to find groups
+#                                                                  the model gets wrong with high confidence
+#   --check cal.json                                              apply a calibrated schema to the outputs offline
 import argparse
 import base64
 import json
@@ -62,7 +67,17 @@ def ece(rows, t, bins=10):
     return err
 
 
-def choose_threshold(rows, t, target, min_accept):
+def wilson_lower(ok, n, level):
+    if level <= 0:
+        return ok / n
+    z = {0.8: 1.2816, 0.9: 1.6449, 0.95: 1.96, 0.99: 2.5758}.get(level)
+    if z is None:
+        raise SystemExit("--confidence-level must be 0, 0.8, 0.9, 0.95 or 0.99")
+    p = ok / n
+    return (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+
+
+def choose_threshold(rows, t, target, min_accept, level=0.0):
     # lowest confidence at which the answers at or above it reach the target accuracy (None: never)
     scored = sorted((confidence(r, t) for r in rows), reverse=True)
     best, correct = None, 0
@@ -71,7 +86,7 @@ def choose_threshold(rows, t, target, min_accept):
         # only cut between different confidences: a threshold accepts all answers that tie at it
         if k < len(scored) and scored[k][0] == c:
             continue
-        if k >= min_accept and correct / k >= target:
+        if k >= min_accept and wilson_lower(correct, k, level) >= target:
             best = c
     return best
 
@@ -83,7 +98,7 @@ def accepted(rows, t, thr):
     return len(sel), sum(sel)
 
 
-def calibrate(rows, target, folds, min_accept):
+def calibrate(rows, target, folds, min_accept, level=0.0):
     idx = list(range(len(rows)))
     random.Random(0).shuffle(idx)
     n_acc = n_ok = 0
@@ -91,11 +106,11 @@ def calibrate(rows, target, folds, min_accept):
         test = set(idx[f::folds])
         train = [rows[i] for i in idx if i not in test]
         t = fit_temperature(train)
-        thr = choose_threshold(train, t, target, min_accept)
+        thr = choose_threshold(train, t, target, min_accept, level)
         a, ok = accepted([rows[i] for i in test], t, thr)
         n_acc, n_ok = n_acc + a, n_ok + ok
     t = fit_temperature(rows)
-    thr = choose_threshold(rows, t, target, min_accept)
+    thr = choose_threshold(rows, t, target, min_accept, level)
     a, ok = accepted(rows, t, thr)
     return {
         "temperature": round(t, 3),
@@ -126,6 +141,49 @@ def run_model(args, schema, items):
     return rows, served, sum(ms) / len(ms)
 
 
+def values_of(spec):
+    # allowed values in the order the server scores them
+    if "choices" in spec or "enum" in spec:
+        return spec.get("choices", spec.get("enum"))
+    if spec.get("type") == "boolean":
+        return [True, False]
+    if spec.get("type") == "integer":
+        return list(range(spec["minimum"], spec["maximum"] + 1))
+    raise SystemExit("group keys must be enum, boolean or integer fields")
+
+
+def predicted(rows, schema, key):
+    values = values_of(schema[key])
+    return [str(values[max(range(len(r["probs"])), key=r["probs"].__getitem__)]) for r in rows[key]]
+
+
+def groups_report(rows, schema, name, keys, t, thr, target, min_n=10):
+    # accepted accuracy per value the model predicts for another field (known at run time); a group that
+    # misses the target on enough answers becomes an escalation rule
+    out, rules = {}, []
+    for key in keys:
+        pred = predicted(rows, schema, key)
+        for value in sorted(set(pred)):
+            idx = [i for i, v in enumerate(pred) if v == value]
+            a, ok = accepted([rows[name][i] for i in idx], t, thr) if thr is not None else (0, 0)
+            below = bool(a and ok / a < target)
+            out[f"{key}={value}"] = {"n": len(idx), "coverage": round(a / len(idx), 3),
+                                     "accepted_accuracy": round(ok / a, 3) if a else None, "below_target": below}
+            if below and a >= min_n:
+                rules.append({"field": name, "escalate_when": {key: value}, "accepted_accuracy": round(ok / a, 3), "accepted": a})
+    return out, rules
+
+
+def rule_hits(rows, schema, rules, name):
+    # answers of `name` that a rule sends to a fallback
+    hit = [False] * len(rows[name])
+    for rule in (r for r in rules if r["field"] == name):
+        for key, value in rule["escalate_when"].items():
+            for i, v in enumerate(predicted(rows, schema, key)):
+                hit[i] = hit[i] or v == value
+    return hit
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dir")
@@ -139,6 +197,11 @@ def main():
     ap.add_argument("--schema-out")
     ap.add_argument("--dump")
     ap.add_argument("--from", dest="src")
+    ap.add_argument("--confidence-level", type=float, default=0.0)
+    ap.add_argument("--group-by", default="", help="comma separated label keys")
+    ap.add_argument("--check", help="calibrated schema to apply offline to the model outputs (sent with T = 1)")
+    ap.add_argument("--rules-out", help="write escalation rules for groups below the target")
+    ap.add_argument("--rules", help="escalation rules to apply in --check")
     ap.add_argument("--out")
     args = ap.parse_args()
 
@@ -154,6 +217,7 @@ def main():
             json.dump({"rows": rows, "served": served, "mean_per_decision_ms": mean_ms}, open(args.dump, "w"))
 
     report = {"n": len(items), "wall_s": round(time.time() - t0, 2), "mean_per_decision_ms": round(mean_ms, 1), "fields": {}}
+    all_rules = []
     for name, rs in rows.items():
         t = fit_temperature(rs)
         field = {
@@ -166,8 +230,27 @@ def main():
             kept = [ok for ab, ok in served[name] if not ab]
             field["served_accepted_accuracy"] = round(sum(kept) / len(kept), 4) if kept else None
             field["served_coverage"] = round(len(kept) / len(served[name]), 4)
+        keys = [k for k in args.group_by.split(",") if k]
         if args.target_accuracy:
-            field["calibration"] = calibrate(rs, args.target_accuracy, args.folds, args.min_accept)
+            field["calibration"] = calibrate(rs, args.target_accuracy, args.folds, args.min_accept, args.confidence_level)
+            c = field["calibration"]
+            if keys:
+                field["groups"], new_rules = groups_report(rows, schema, name, keys, c["temperature"], c["threshold"], args.target_accuracy)
+                all_rules.extend(new_rules)
+        if args.check:
+            spec = json.load(open(args.check))[name]
+            t_chk = spec.get("temperature", 1.0)
+            thr = spec.get("abstain", {}).get("min_probability", 0.0)
+            a, ok = accepted(rs, t_chk, thr)
+            field["check"] = {"temperature": t_chk, "threshold": thr, "accepted_accuracy": round(ok / a, 4) if a else None,
+                              "coverage": round(a / len(rs), 4)}
+            if args.rules:
+                hit = rule_hits(rows, schema, json.load(open(args.rules)), name)
+                kept = [confidence(r, t_chk)[1] for r, h in zip(rs, hit) if not h and confidence(r, t_chk)[0] >= thr]
+                field["check"]["with_rules"] = {"accepted_accuracy": round(sum(kept) / len(kept), 4) if kept else None,
+                                                "coverage": round(len(kept) / len(rs), 4)}
+            if keys:
+                field["check"]["groups"], _ = groups_report(rows, schema, name, keys, t_chk, thr, args.target_accuracy or 1.0)
         report["fields"][name] = field
 
     if args.target_accuracy and args.schema_out:
@@ -179,6 +262,9 @@ def main():
             out[name]["abstain"] = {"min_probability": c["threshold"] if c["usable"] else 1.0}
         json.dump(out, open(args.schema_out, "w"), indent=1)
         report["schema_out"] = args.schema_out
+    if args.rules_out:
+        json.dump(all_rules, open(args.rules_out, "w"), indent=1)
+        report["rules"] = all_rules
     print(json.dumps(report, indent=1))
     if args.out:
         json.dump(report, open(args.out, "w"), indent=1)
