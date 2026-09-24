@@ -141,7 +141,9 @@ def test_decision_vision_batch_and_modes():
         single = decide({"schema": SCHEMA, "contexts": [c]})["results"][0]
         for name, f in single["fields"].items():
             assert batch["results"][i]["fields"][name]["value"] == f["value"]
-            assert abs(batch["results"][i]["fields"][name]["probability"] - f["probability"]) < 1e-5
+            # bit-identical on CPU; GPU kernels depend on the batch size and the tiny model amplifies that
+            # (a mixed up context moves it by more than 0.1)
+            assert abs(batch["results"][i]["fields"][name]["probability"] - f["probability"]) < 3e-2
     tree = decide({"schema": SCHEMA, "contexts": contexts[:1], "mode": "tree"})["results"][0]["decision"]
     greedy = decide({"schema": SCHEMA, "contexts": contexts[:1], "mode": "greedy"})["results"][0]["decision"]
     assert tree["animal"] == greedy["animal"]

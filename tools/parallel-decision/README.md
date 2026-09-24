@@ -294,6 +294,12 @@ N images: one request with N contexts vs N requests:
 | SmolVLM-500M Q8_0 | count | 0.94 | 0.96 | 0.033 | 1.078 | 0.040 |
 | SmolVLM-500M Q8_0 | dark_background | 0.47 | 0.89 | 0.416 | 20.0 | 0.059 |
 
+GPU (RTX 5060 Ti 16 GB via WSL2, CUDA 12.9, `-ngl 99 -fa on`), Qwen3-VL-2B Q8_0, same images and fields: decision
+95 ms vs chat + `json_schema` 357 ms (median per image), all 4 fields right in both; 1 / 16 fields on one image
+99 / 112 ms; 8 images in one request 0.57 s; a 4000x3000 photo capped at 1024 image tokens 0.74 s cold, 0.39 s with its
+embedding cached. Raw data: `bench/results/bench-qwen3-gpu.json`. On a GPU, batched and single requests can differ in the
+last digits (kernels depend on the batch size): up to 4e-6 with Qwen3-VL; decisions are the same.
+
 - A decision is 4x faster than a chat completion with a `json_schema` response on the Qwen models, and extra fields
   are nearly free after the image prefill (Qwen3-VL: 1 field 2.5 s, 16 fields 3.9 s).
 - Schema-valid is not correct: SmolVLM answers `dark_background` at chance with 0.89 mean confidence. `evaluate.py`

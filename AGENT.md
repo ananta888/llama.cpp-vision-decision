@@ -103,4 +103,6 @@ A supported open-weight VLM served by `llama-server` takes an image directly, an
 
 ## Environment notes
 
-- Dev box: RTX 5060 Ti 16 GB, but no CUDA toolkit (`nvcc`) and no Vulkan SDK, and no passwordless sudo. Builds are CPU-only here; GPU numbers need a CUDA toolkit install.
+- Dev box: RTX 5060 Ti 16 GB (eGPU, WSL2, driver CUDA 13.1, sm_120), no passwordless sudo. CUDA 12.9 lives in `~/cuda-12.9`, put together without sudo: `cuda_nvcc`, `cuda_cudart` and `cuda_cccl` from NVIDIA's redist archives (developer.download.nvidia.com/compute/cuda/redist, SHA-256 from `redistrib_12.9.1.json`) plus cuBLAS headers and libraries from the `nvidia-cublas-cu12` wheel. The `nvidia-cuda-nvcc-cu12` wheel alone is not enough (no `nvcc`, no `cicc`).
+- GPU build: `cmake -B build-cuda -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120 -DCUDAToolkit_ROOT=$HOME/cuda-12.9 -DCMAKE_CUDA_COMPILER=$HOME/cuda-12.9/bin/nvcc -DCMAKE_BUILD_RPATH=$HOME/cuda-12.9/lib -DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,$HOME/cuda-12.9/lib -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,$HOME/cuda-12.9/lib` (the rpath-link flags are needed because the toolkit is not in the system library path).
+- Ollama keeps about 11 GB of the GPU; Qwen3-VL-2B with 16k context fits next to it, larger models do not.
