@@ -88,13 +88,13 @@ def main():
         pairs = [(s["est"][name]["value"], s["truth"][name]) for s in samples
                  if s["truth"].get(name) is not None and name in s["est"] and s["est"][name]["value"] is not None]
         known = [s for s in samples if name in s["truth"] and name in s["est"]]
-        fits[name] = {"fit": fit_field(pairs), "none_right": sum((s["truth"][name] is None) == (s["est"][name]["value"] is None) for s in known),
-                      "none_n": len(known)}
-        f = fits[name]["fit"]
+        f = fit_field(pairs)
+        none_right = sum((s["truth"][name] is None) == (s["est"][name]["value"] is None) for s in known)
+        fits[name] = {"fit": f, "pairs": len(pairs), "none_right": none_right, "none_n": len(known)}
         if f:
             print(f"{name:20s} n {f['n']:3d}  {f['kind']:6s} a {f['a']:.3f} b {f['b']:+.2f}  error raw {f['mae_raw']:.2f} -> calibrated {f['mae_cal']:.2f}"
                   f"  80% range +-{f['half_width']:.2f}{'' if f['range_ok'] else ' (few samples)'}  {'used' if f['apply'] else 'not better'}"
-                  f"  none right {fits[name]['none_right']}/{fits[name]['none_n']}")
+                  f"  none right {none_right}/{len(known)}")
         else:
             print(f"{name:20s} fewer than 2 measured samples")
     json.dump({"kind": "decision-size-calibration", "version": 1, "exported": datetime.datetime.now().isoformat(),
