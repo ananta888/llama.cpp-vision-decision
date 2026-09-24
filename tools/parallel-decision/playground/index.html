@@ -136,6 +136,28 @@
     whether it is fit for measuring, and the model estimates sizes in cm with a p10-p90 range, or "none" where the photo does not show
     them. These are model estimates, not measurements: a single photo has no scale, so treat them as rough until calibrated on
     measured people.</div>
+  <div id="sizeBlock" hidden>
+    <div class="row">
+      <div><label for="correction">Size correction</label><select id="correction">
+        <option value="none">none (raw estimates)</option><option value="height">scale by known body height</option>
+        <option value="samples">calibration from my measurements</option></select></div>
+      <div><label for="knownHeight">Known body height (cm)</label><input id="knownHeight" type="number" min="100" max="230" step="1" placeholder="e.g. 178"></div>
+    </div>
+    <details id="calBlock" style="margin-top: 8px">
+      <summary class="hint">Calibration from my measurements (<span id="calCount">0</span> samples)</summary>
+      <div class="hint" style="margin-top: 6px">Measure a person with a tape, take the photo, press Decide, then enter the true sizes and add the
+        sample. Only the model output and your numbers are kept (in this browser, and in the export), never the photo.</div>
+      <div id="truthForm" class="row"></div>
+      <div class="actions">
+        <button class="ghost" id="calAdd">add sample from the current result</button>
+        <button class="ghost" id="calExport">export</button>
+        <button class="ghost" id="calImportBtn">import</button><input id="calImport" type="file" accept=".json,application/json" hidden>
+        <button class="ghost" id="calClear">clear samples</button>
+      </div>
+      <div id="calMsg" class="hint"></div>
+      <div class="table-wrap"><table id="calTable"></table></div>
+    </details>
+  </div>
   <details id="schemaBlock" open>
   <summary class="hint" id="schemaSummary" style="margin-top: 10px">Schema</summary>
   <label for="preset">Schema</label>
@@ -276,6 +298,7 @@ checkSchema();
 function applyMode() {
   const body = $("appmode").value === "body";
   $("bodyInfo").hidden = !body;
+  $("sizeBlock").hidden = !body;
   if (body) {
     $("preset").value = "Body photo check";
     $("schema").value = JSON.stringify(PRESETS["Body photo check"], null, 2);
@@ -290,6 +313,7 @@ function applyMode() {
   $("preset").disabled = body;
   $("schema").readOnly = body;
   $("runas").disabled = body;
+  if (body) drawCalibration(); // after the body schema is in place
   store("dp.mode", $("appmode").value);
 }
 $("appmode").value = load("dp.mode", "general");
@@ -524,6 +548,159 @@ function showError(msg) {
   out.appendChild(el("p", { className: "err" }, msg));
 }
 
+// ---- size correction: known height, or a fit on the user's own measurements
+function sizeFields() {
+  const schema = checkSchema() || {};
+  return Object.keys(schema).filter((k) => /_cm$/.test(k) && (schema[k].type === "integer" || schema[k].type === "number"));
+}
+function estimateOf(f) {
+  const p = f.probs ? f.probs.find((c) => c.value === null) : null;
+  return { value: f.value, lo: f.interval_p10_p90 ? f.interval_p10_p90[0] : null, hi: f.interval_p10_p90 ? f.interval_p10_p90[1] : null,
+           p_null: p ? p.probability : null };
+}
+function samples() { return load("dp.calSamples", []); }
+function fitField(pairs) {
+  // pairs of [estimate, truth]; offset from 2, straight line from 5; kept only if leave-one-out beats the raw error
+  const n = pairs.length;
+  if (n < 2) return null;
+  const fit = (ps, linear) => {
+    const me = ps.reduce((a, p) => a + p[0], 0) / ps.length, mt = ps.reduce((a, p) => a + p[1], 0) / ps.length;
+    let sxx = 0, sxy = 0;
+    for (const [e, t] of ps) { sxx += (e - me) * (e - me); sxy += (e - me) * (t - mt); }
+    if (!linear || sxx === 0) return { a: 1, b: mt - me };
+    const a = sxy / sxx;
+    return { a, b: mt - a * me };
+  };
+  const loo = (linear) => pairs.map((p, i) => {
+    const m = fit(pairs.filter((_, j) => j !== i), linear);
+    return p[1] - (m.a * p[0] + m.b);
+  });
+  const mae = (rs) => rs.reduce((a, r) => a + Math.abs(r), 0) / rs.length;
+  const raw = mae(pairs.map((p) => p[1] - p[0]));
+  const rOff = loo(false), rLin = n >= 5 ? loo(true) : null;
+  const linear = rLin !== null && mae(rLin) < mae(rOff);
+  const res = linear ? rLin : rOff;
+  const m = fit(pairs, linear);
+  // split-conformal: the ceil((n+1)*0.8)-th smallest absolute residual covers about 80% of new cases
+  const abs = res.map(Math.abs).sort((x, y) => x - y);
+  const k = Math.ceil((n + 1) * 0.8) - 1;
+  return { n, kind: linear ? "line" : "offset", a: m.a, b: m.b, mae_raw: raw, mae_cal: mae(res), half_width: abs[Math.min(k, n - 1)],
+           range_ok: k < n, apply: mae(res) < raw };
+}
+function fits() {
+  const out = {};
+  for (const name of sizeFields()) {
+    const pairs = samples().filter((s) => s.truth[name] !== undefined && s.truth[name] !== null && s.est[name] && s.est[name].value !== null && s.est[name].value !== undefined)
+                           .map((s) => [s.est[name].value, s.truth[name]]);
+    const f = fitField(pairs);
+    const withNone = samples().filter((s) => s.truth[name] !== undefined && s.est[name]);
+    out[name] = { fit: f, pairs: pairs.length, none_right: withNone.filter((s) => (s.truth[name] === null) === (s.est[name].value === null)).length, none_n: withNone.length };
+  }
+  return out;
+}
+function corrected(name, f, all) {
+  // corrected {value, lo, hi} or a note; null for fields that are not sizes
+  if (!/_cm$/.test(name) || !f) return null;
+  const how = $("correction").value;
+  if (how === "none" || f.value === null) return null;
+  if (how === "height") {
+    const known = parseFloat($("knownHeight").value), est = all.height_cm && all.height_cm.value;
+    if (!known) return { note: "enter the known height" };
+    if (!est) return { note: "height not visible: no scale" };
+    const k = known / est;
+    if (name === "height_cm") return { value: known, lo: known, hi: known };
+    return { value: f.value * k, lo: f.interval_p10_p90 ? f.interval_p10_p90[0] * k : null, hi: f.interval_p10_p90 ? f.interval_p10_p90[1] * k : null };
+  }
+  const c = fits()[name];
+  if (!c || !c.fit) return { note: "not calibrated yet" };
+  if (!c.fit.apply) return { note: "calibration not better than raw" };
+  const v = c.fit.a * f.value + c.fit.b;
+  return { value: v, lo: v - c.fit.half_width, hi: v + c.fit.half_width };
+}
+function corrText(name, f, all) {
+  const c = corrected(name, f, all);
+  if (!c) return "";
+  if (c.note) return "  [" + c.note + "]";
+  return "  -> " + Math.round(c.value) + (c.lo !== null && c.lo !== undefined ? " (" + Math.round(c.lo) + "-" + Math.round(c.hi) + ")" : "");
+}
+function drawCalibration() {
+  const form = $("truthForm");
+  const names = sizeFields();
+  if (form.dataset.fields !== names.join(",")) {
+    form.innerHTML = "";
+    for (const n of names) {
+      const d = el("div");
+      d.appendChild(el("label", { htmlFor: "truth-" + n }, n + " true"));
+      const inp = el("input", { id: "truth-" + n, type: "text", placeholder: "cm, empty = skip, none" });
+      d.appendChild(inp);
+      form.appendChild(d);
+    }
+    form.dataset.fields = names.join(",");
+  }
+  const all = fits(), n = samples().length;
+  $("calCount").textContent = n;
+  const tb = $("calTable");
+  tb.innerHTML = "";
+  tb.appendChild(rowOf(["size", "samples", "correction", "error raw", "error calibrated", "80% range", "none right", ""], "th"));
+  for (const name of names) {
+    const c = all[name], f = c.fit;
+    const tr = rowOf([name, c.pairs, f ? (f.kind === "line" ? f.a.toFixed(2) + " x + " + f.b.toFixed(1) : (f.b >= 0 ? "+" : "") + f.b.toFixed(1) + " cm") : "-",
+                      f ? f.mae_raw.toFixed(1) + " cm" : "-", f ? f.mae_cal.toFixed(1) + " cm" : "-",
+                      f ? "+-" + f.half_width.toFixed(1) + (f.range_ok ? "" : " (few samples)") : "-",
+                      c.none_n ? c.none_right + "/" + c.none_n : "-", f ? (f.apply ? "used" : "not better") : "need 2"]);
+    tr.lastChild.className = f && f.apply ? "same" : "diff";
+    tb.appendChild(tr);
+  }
+}
+$("correction").onchange = () => { store("dp.correction", $("correction").value); if (last) (liveTimer ? renderLive(last, 0) : render(last)); };
+$("knownHeight").onchange = $("correction").onchange;
+$("correction").value = load("dp.correction", "none");
+$("calAdd").onclick = () => {
+  const r = last && last.response && last.response.results[0];
+  if (!r) { $("calMsg").textContent = "run a decision first"; return; }
+  const truth = {}, est = {};
+  for (const n of sizeFields()) {
+    const raw = ($("truth-" + n).value || "").trim().toLowerCase();
+    if (raw === "") continue;
+    if (raw === "none" || raw === "null") truth[n] = null;
+    else if (isFinite(parseFloat(raw))) truth[n] = parseFloat(raw);
+    else { $("calMsg").textContent = n + ": enter a number in cm, or none"; return; }
+    if (r.fields[n]) est[n] = estimateOf(r.fields[n]);
+  }
+  if (!Object.keys(truth).length) { $("calMsg").textContent = "enter at least one true size"; return; }
+  const all = samples();
+  all.push({ at: new Date().toISOString(), est, truth });
+  store("dp.calSamples", all);
+  for (const n of sizeFields()) $("truth-" + n).value = "";
+  $("calMsg").textContent = "sample added";
+  drawCalibration();
+};
+$("calExport").onclick = () => {
+  const data = { kind: "decision-size-calibration", version: 1, exported: new Date().toISOString(), samples: samples(), fits: fits() };
+  const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })), download: "size-calibration.json" });
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("calImportBtn").onclick = () => $("calImport").click();
+$("calImport").onchange = async (e) => {
+  try {
+    const data = JSON.parse(await e.target.files[0].text());
+    if (!Array.isArray(data.samples)) throw new Error("no samples in this file");
+    const all = samples(), seen = new Set(all.map((x) => x.at + JSON.stringify(x.truth)));
+    let added = 0;
+    for (const x of data.samples) if (x.est && x.truth && !seen.has(x.at + JSON.stringify(x.truth))) { all.push(x); added++; }
+    store("dp.calSamples", all);
+    $("calMsg").textContent = added + " samples imported";
+    drawCalibration();
+  } catch (err) { $("calMsg").textContent = "import failed: " + (err.message || err); }
+  e.target.value = "";
+};
+$("calClear").onclick = () => {
+  if (!confirm("Delete all calibration samples in this browser?")) return;
+  store("dp.calSamples", []);
+  drawCalibration();
+};
+
 // ---- webcam
 let stream = null, liveTimer = null, busy = false, skipped = 0, frames = 0;
 function grabFrame() {
@@ -663,7 +840,9 @@ function renderLive(runData, wall) {
   for (const n of names) {
     const f = vals[n], tr = document.getElementById("lv-" + n);
     if (!tr) continue;
-    const cells = tr.children, span = cells[1].firstChild, text = show(f.value) + (f.interval ? " (" + f.interval.map(show).join("-") + ")" : "");
+    const cells = tr.children, span = cells[1].firstChild,
+          text = show(f.value) + (f.interval ? " (" + f.interval.map(show).join("-") + ")" : "") +
+                 (runData.response ? corrText(n, runData.response.results[0].fields[n], runData.response.results[0].fields) : "");
     if (span.textContent !== text) {
       if (span.textContent) { span.classList.add("flash"); setTimeout(() => span.classList.remove("flash"), 60); }
       span.textContent = text;
@@ -781,7 +960,7 @@ function renderDecision(runData, out) {
   for (const [name, f] of Object.entries(r.fields)) {
     const box = el("div", { className: "field" });
     const h = el("h3");
-    h.appendChild(el("span", {}, name + " = " + show(f.value) + range(f)));
+    h.appendChild(el("span", {}, name + " = " + show(f.value) + range(f) + corrText(name, f, r.fields)));
     h.appendChild(el("span", { className: "meta" }, "p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) + "  entropy " + f.entropy.toFixed(3) : "") + (f.tree ? "" : "  (greedy)")));
     if (f.abstain !== undefined) h.appendChild(el("span", { className: "badge " + (f.abstain ? "abstain" : "ok") }, f.abstain ? "abstain" : "accept"));
     box.appendChild(h);

@@ -346,7 +346,12 @@ response. The "Body photo check" mode fixes a schema that decides whether a phot
 to feet, front or side view, standing straight, sharp, not distorted) and shows one verdict (yes / no / unsure) with a
 checklist, plus size estimates in cm (height, shoulder width, chest, waist, hip, inseam, arm length) as nullable fields
 with their p10-p90 range, "none" where the photo does not show them. These are model estimates, not measurements (one
-photo has no scale); calibrate them on measured people before relying on them. With the webcam as source, the
+photo has no scale); calibrate them on measured people before relying on them. The page offers two corrections: scale all
+sizes by a known body height, or a calibration from your own measurements (enter the tape-measured sizes of a result and
+add it as a sample; per size an offset from 2 samples or a straight line from 5, used only if a leave-one-out check beats
+the raw estimate, with an 80% range from the leave-one-out errors). Samples keep the model output and your numbers,
+never the photo, and export / import as JSON. `bench/calibrate_sizes.py` does the same for a folder of photos with a
+`labels.jsonl` of measured sizes and writes a file the page imports. With the webcam as source, the
 page takes a frame every 1-30 s (or on demand), scales it like an upload and decides it; frames that would overlap a
 running request are skipped and counted, the tab pauses when hidden, and live frames are logged but not kept in the
 history. Browsers allow the camera only on localhost / 127.0.0.1 or over https. A trace
