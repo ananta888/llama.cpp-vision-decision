@@ -111,6 +111,11 @@ Compact fields, or a JSON Schema object with `properties`:
 
 Numeric fields take `aggregate`: `mode` (default), `median` or `mean`.
 
+Any field can allow `null` as one more value, e.g. for a size the image does not show: `"nullable": true`, a
+`"type": ["integer", "null"]` list, or `null` in an `enum` (JSON Schema). `null` is scored like any other value. For
+numeric fields the median, mean and `interval_p10_p90` use the numbers only, and the field is `null` when `p(null)` is
+0.5 or more.
+
 Every field also takes `temperature` and `abstain` (`x-temperature` / `x-abstain` in JSON Schema), see
 [Calibration and abstain](#calibration-and-abstain).
 
@@ -339,7 +344,9 @@ probability, margin and abstain marks, a time bar (image encode, prefill, field 
 step by step, the prompt as the model sees it, the chunks and positions, the fields as scored, and the raw request and
 response. The "Body photo check" mode fixes a schema that decides whether a photo is fit for measuring body sizes (one person, head
 to feet, front or side view, standing straight, sharp, not distorted) and shows one verdict (yes / no / unsure) with a
-checklist; it does not measure anything, and its fields should be calibrated on real photos before use. With the webcam as source, the
+checklist, plus size estimates in cm (height, shoulder width, chest, waist, hip, inseam, arm length) as nullable fields
+with their p10-p90 range, "none" where the photo does not show them. These are model estimates, not measurements (one
+photo has no scale); calibrate them on measured people before relying on them. With the webcam as source, the
 page takes a frame every 1-30 s (or on demand), scales it like an upload and decides it; frames that would overlap a
 running request are skipped and counted, the tab pauses when hidden, and live frames are logged but not kept in the
 history. Browsers allow the camera only on localhost / 127.0.0.1 or over https. A trace

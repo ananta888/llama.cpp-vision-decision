@@ -295,3 +295,27 @@ def test_decision_trace():
     assert [c["type"] for c in image["chunks"]].count("image") == 1
     assert image["prompt"].count("<image>") == 1
     assert "<__media" not in json.dumps(body)
+
+
+def test_decision_nullable_fields():
+    global server
+    server.start()
+    schema = {
+        "hip_cm": {"type": "integer", "minimum": 70, "maximum": 90, "nullable": True, "aggregate": "median", "description": "Hip size, null if not visible."},
+        "view": {"type": "enum", "choices": ["front", "side"], "nullable": True, "description": "View, null if no person."},
+    }
+    for body in (decide({"schema": schema, "contexts": ["A face seen from very close.", image_context([0])], "return_probs": True}),):
+        for r in body["results"]:
+            for name, f in r["fields"].items():
+                values = [c["value"] for c in f["probs"]]
+                assert values[-1] is None
+                p_null = f["probs"][-1]["probability"]
+                if f["value"] is None:
+                    assert p_null >= 0.5 and r["decision"][name] is None
+                elif name == "hip_cm":
+                    assert 70 <= f["value"] <= 90 and "interval_p10_p90" in f
+    # the same field written as JSON Schema
+    js = {"properties": {"hip_cm": {"type": ["integer", "null"], "minimum": 70, "maximum": 90}, "view": {"enum": ["front", "side", None]}}}
+    r = decide({"schema": js, "contexts": ["A face seen from very close."], "return_probs": True})["results"][0]
+    assert [c["value"] for c in r["fields"]["view"]["probs"]] == ["front", "side", None]
+    assert r["fields"]["hip_cm"]["probs"][-1]["value"] is None

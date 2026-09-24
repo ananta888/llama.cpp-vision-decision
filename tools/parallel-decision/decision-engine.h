@@ -137,6 +137,7 @@ struct field_spec {
     std::vector<common_json> values;      // typed values; index = candidate index
     std::vector<double>      numbers;     // numeric fields: the same values as doubles
     std::vector<std::string> encoded;     // JSON text of each value
+    bool                     nullable        = false; // null is one more allowed value (numbers: NaN)
     float                    temperature     = 1.0f;
     double                   min_probability = 0; // abstain below this probability
     double                   min_margin      = 0; // abstain below this top-2 margin (tree fields)

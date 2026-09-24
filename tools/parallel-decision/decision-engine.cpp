@@ -583,7 +583,7 @@ std::string json_text(const std::string & s) {
 }
 
 field_spec make_field(const std::string & name, const std::string & type, const std::string & description,
-                      const common_json & spec, bool json_schema) {
+                      const common_json & spec, bool json_schema, bool nullable) {
     field_spec f;
     f.name        = name;
     f.description = description;
@@ -649,6 +649,15 @@ field_spec make_field(const std::string & name, const std::string & type, const 
     } else {
         throw std::invalid_argument("field \"" + name + "\": supported types are boolean, enum, integer and number");
     }
+    if (nullable) {
+        // e.g. a size that the image does not show
+        f.nullable = true;
+        f.values.push_back(common_json(nullptr));
+        f.encoded.push_back("null");
+        if (!f.numbers.empty()) {
+            f.numbers.push_back(std::nan(""));
+        }
+    }
     if (f.values.empty() || f.values.size() > 255) {
         throw std::invalid_argument("field \"" + name + "\" needs 1-255 allowed values");
     }
@@ -685,15 +694,38 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         if (!spec.is_object()) {
             throw std::invalid_argument("field \"" + e.key() + "\" must be an object");
         }
-        std::string type = spec.value("type", std::string());
-        if (spec.contains("enum")) {
+        // null can be allowed with "nullable": true, a "null" in a type list, or a null in an enum
+        bool nullable = spec.value("nullable", false);
+        std::string type;
+        if (spec.contains("type") && spec.at("type").is_array()) {
+            for (const auto & t : spec.at("type")) {
+                if (t == "null") {
+                    nullable = true;
+                } else if (t.is_string()) {
+                    type = t.get<std::string>();
+                }
+            }
+        } else {
+            type = spec.value("type", std::string());
+        }
+        common_json field = spec;
+        if (field.contains("enum")) {
             type = "enum";
+            common_json choices = common_json::array();
+            for (const auto & c : field.at("enum")) {
+                if (c.is_null()) {
+                    nullable = true;
+                } else {
+                    choices.push_back(c);
+                }
+            }
+            field["enum"] = choices;
         }
         std::string description = spec.value("description", std::string());
         if (!json_schema && description.empty()) {
             throw std::invalid_argument("field \"" + e.key() + "\" needs a description");
         }
-        field_spec f = make_field(e.key(), type, description, spec, json_schema);
+        field_spec f = make_field(e.key(), type, description, field, json_schema, nullable);
         const char * t_key = json_schema ? "x-temperature" : "temperature";
         const char * a_key = json_schema ? "x-abstain" : "abstain";
         const common_json t = spec.contains(t_key) ? spec.at(t_key) : defaults.value("temperature", common_json(1.0));
@@ -782,39 +814,52 @@ common_json assemble(const compiled_schema & cs, const result & r, bool with_pro
         const bool numeric = !sp.numbers.empty();
         const bool tree    = fr.probs.size() == sp.values.size();
         if (numeric && tree) {
-            std::vector<int> order(sp.values.size());
-            for (size_t k = 0; k < order.size(); ++k) {
-                order[k] = (int) k;
+            // aggregates and the interval use the numbers only; a nullable field is null when p(null) >= 0.5
+            int null_idx = -1;
+            std::vector<int> order;
+            for (size_t k = 0; k < sp.numbers.size(); ++k) {
+                if (std::isnan(sp.numbers[k])) {
+                    null_idx = (int) k;
+                } else {
+                    order.push_back((int) k);
+                }
             }
+            const double p_num = 1.0 - (null_idx >= 0 ? fr.probs[null_idx] : 0.0);
             std::sort(order.begin(), order.end(), [&](int a, int b) { return sp.numbers[a] < sp.numbers[b]; });
             auto quantile = [&](double q) {
                 double acc = 0;
                 for (int k : order) {
-                    acc += fr.probs[k];
+                    acc += fr.probs[k] / p_num;
                     if (acc >= q) {
                         return k;
                     }
                 }
                 return order.back();
             };
-            double mean = 0;
-            for (size_t k = 0; k < sp.numbers.size(); ++k) {
-                mean += sp.numbers[k] * fr.probs[k];
-            }
-            if (sp.aggregate == "median") {
-                idx = quantile(0.5);
-            } else if (sp.aggregate == "mean") {
-                idx = 0;
-                for (size_t k = 1; k < sp.numbers.size(); ++k) {
-                    if (std::fabs(sp.numbers[k] - mean) < std::fabs(sp.numbers[idx] - mean)) {
-                        idx = (int) k;
-                    }
+            if (null_idx >= 0 && fr.probs[null_idx] >= 0.5) {
+                idx = null_idx;
+            } else if (p_num > 0 && !order.empty()) {
+                double mean = 0;
+                for (int k : order) {
+                    mean += sp.numbers[k] * fr.probs[k] / p_num;
                 }
+                if (sp.aggregate == "median") {
+                    idx = quantile(0.5);
+                } else if (sp.aggregate == "mean") {
+                    idx = order[0];
+                    for (int k : order) {
+                        if (std::fabs(sp.numbers[k] - mean) < std::fabs(sp.numbers[idx] - mean)) {
+                            idx = k;
+                        }
+                    }
+                } else if (idx == null_idx) {
+                    idx = *std::max_element(order.begin(), order.end(), [&](int a, int b) { return fr.probs[a] < fr.probs[b]; });
+                }
+                common_json interval = common_json::array();
+                interval.push_back(sp.values[quantile(0.1)]);
+                interval.push_back(sp.values[quantile(0.9)]);
+                f["interval_p10_p90"] = interval;
             }
-            common_json interval = common_json::array();
-            interval.push_back(sp.values[quantile(0.1)]);
-            interval.push_back(sp.values[quantile(0.9)]);
-            f["interval_p10_p90"] = interval;
         }
         if (idx < 0 || idx >= (int) sp.values.size()) {
             throw std::runtime_error("field \"" + sp.name + "\" has no selected value");

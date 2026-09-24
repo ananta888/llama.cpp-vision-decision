@@ -133,7 +133,9 @@
   <label for="text">Text after the images</label>
   <input id="text" type="text" value="Answer the questions about this picture.">
   <div id="bodyInfo" class="hint" hidden style="margin-top: 10px">Body photo check: one photo of one person, head to feet. The page decides
-    whether it is fit for measuring body sizes. It does not measure anything itself.</div>
+    whether it is fit for measuring, and the model estimates sizes in cm with a p10-p90 range, or "none" where the photo does not show
+    them. These are model estimates, not measurements: a single photo has no scale, so treat them as rough until calibrated on
+    measured people.</div>
   <details id="schemaBlock" open>
   <summary class="hint" id="schemaSummary" style="margin-top: 10px">Schema</summary>
   <label for="preset">Schema</label>
@@ -199,7 +201,14 @@ const PRESETS = {
     reference_object: { type: "enum", choices: ["a4_paper", "door_frame", "credit_card", "other", "none"], description: "Is an object of known size visible next to the person?" },
     sharp: { type: "boolean", description: "Is the image sharp and not blurry?", abstain: { min_probability: 0.8 } },
     lighting: { type: "enum", choices: ["good", "dim", "backlit", "harsh"], description: "How is the lighting on the person?" },
-    distorted: { type: "boolean", description: "Is the body distorted by a wide-angle lens or a camera held too close?", abstain: { min_probability: 0.8 } }
+    distorted: { type: "boolean", description: "Is the body distorted by a wide-angle lens or a camera held too close?", abstain: { min_probability: 0.8 } },
+    height_cm: { type: "integer", minimum: 140, maximum: 210, nullable: true, aggregate: "median", description: "Estimated body height in cm; null if head or feet are not visible." },
+    shoulder_width_cm: { type: "integer", minimum: 30, maximum: 60, nullable: true, aggregate: "median", description: "Estimated shoulder width in cm; null if the shoulders are not visible." },
+    chest_cm: { type: "integer", minimum: 70, maximum: 150, nullable: true, aggregate: "median", description: "Estimated chest circumference in cm; null if the chest is not visible." },
+    waist_cm: { type: "integer", minimum: 55, maximum: 150, nullable: true, aggregate: "median", description: "Estimated waist circumference in cm; null if the waist is not visible." },
+    hip_cm: { type: "integer", minimum: 70, maximum: 150, nullable: true, aggregate: "median", description: "Estimated hip circumference in cm; null if the hips are not visible." },
+    inseam_cm: { type: "integer", minimum: 60, maximum: 100, nullable: true, aggregate: "median", description: "Estimated inseam (inner leg length) in cm; null if the legs are not fully visible." },
+    arm_length_cm: { type: "integer", minimum: 45, maximum: 75, nullable: true, aggregate: "median", description: "Estimated arm length from shoulder to wrist in cm; null if an arm is not fully visible." }
   },
   "Document": {
     is_document: { type: "boolean", description: "Is this a photo or scan of a document?" },
@@ -230,6 +239,8 @@ function el(tag, attrs, text) {
 }
 function store(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage off */ } }
 function load(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
+function show(v) { return v === null ? "none" : JSON.stringify(v); }
+function range(f) { return f.interval_p10_p90 ? " (" + f.interval_p10_p90.map(show).join("-") + ")" : ""; }
 function ms(v) { return v >= 1000 ? (v / 1000).toFixed(2) + " s" : v.toFixed(0) + " ms"; }
 function headers() {
   const h = { "Content-Type": "application/json" };
@@ -378,6 +389,7 @@ function jsonSchemaOf(schema) {
     else if (f.type === "integer") props[name] = { type: "integer", minimum: f.minimum, maximum: f.maximum };
     else if (f.type === "number") props[name] = { type: "number", minimum: f.minimum, maximum: f.maximum };
     else props[name] = { type: "boolean" };
+    if (f.nullable) props[name] = { anyOf: [props[name], { type: "null" }] };
   }
   return { type: "object", properties: props, required: Object.keys(props), additionalProperties: false };
 }
@@ -401,6 +413,7 @@ function systemTextOf(schema, instructions) {
       vals = [];
       for (let i = 0; f.minimum + i * f.step <= f.maximum + 1e-9; i++) vals.push((f.minimum + i * f.step).toFixed(places));
     }
+    if (f.nullable) vals.push("null");
     lines.push(JSON.stringify(n) + (f.description ? ": " + f.description : "") + "\nAllowed values: " + vals.join(", "));
   }
   return "Select the requested field value from its allowed values, based on the context. Respond with the JSON value only.\n\nFields:\n" +
@@ -600,7 +613,7 @@ function fieldValues(runData) {
   // {name: {value, p, margin, abstain}} from the decision, or the chat values without probabilities
   const out = {};
   if (runData.response) {
-    for (const [k, f] of Object.entries(runData.response.results[0].fields)) out[k] = { value: f.value, p: f.probability, margin: f.margin, abstain: f.abstain };
+    for (const [k, f] of Object.entries(runData.response.results[0].fields)) out[k] = { value: f.value, p: f.probability, margin: f.margin, abstain: f.abstain, interval: f.interval_p10_p90 };
   } else {
     for (const [k, v] of Object.entries(chatValues(runData) || {})) out[k] = { value: v };
   }
@@ -650,7 +663,7 @@ function renderLive(runData, wall) {
   for (const n of names) {
     const f = vals[n], tr = document.getElementById("lv-" + n);
     if (!tr) continue;
-    const cells = tr.children, span = cells[1].firstChild, text = JSON.stringify(f.value);
+    const cells = tr.children, span = cells[1].firstChild, text = show(f.value) + (f.interval ? " (" + f.interval.map(show).join("-") + ")" : "");
     if (span.textContent !== text) {
       if (span.textContent) { span.classList.add("flash"); setTimeout(() => span.classList.remove("flash"), 60); }
       span.textContent = text;
@@ -698,7 +711,7 @@ function logLive(runData, wall) {
     verdict = bad ? " -> no" : unsure ? " -> unsure" : " -> yes";
     cls = bad || unsure ? "bad" : "good";
   }
-  const vals = r ? Object.entries(r.fields).map(([k, f]) => k + "=" + JSON.stringify(f.value) + (f.abstain ? "?" : "")).join(" ") : JSON.stringify(chatValues(runData));
+  const vals = r ? Object.entries(r.fields).map(([k, f]) => k + "=" + show(f.value) + (f.abstain ? "?" : "")).join(" ") : JSON.stringify(chatValues(runData));
   logLine(new Date().toLocaleTimeString() + "  " + (wall / 1000).toFixed(2) + " s  " + vals + verdict, cls);
 }
 $("source").onchange = () => {
@@ -768,13 +781,13 @@ function renderDecision(runData, out) {
   for (const [name, f] of Object.entries(r.fields)) {
     const box = el("div", { className: "field" });
     const h = el("h3");
-    h.appendChild(el("span", {}, name + " = " + JSON.stringify(f.value)));
+    h.appendChild(el("span", {}, name + " = " + show(f.value) + range(f)));
     h.appendChild(el("span", { className: "meta" }, "p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) + "  entropy " + f.entropy.toFixed(3) : "") + (f.tree ? "" : "  (greedy)")));
     if (f.abstain !== undefined) h.appendChild(el("span", { className: "badge " + (f.abstain ? "abstain" : "ok") }, f.abstain ? "abstain" : "accept"));
     box.appendChild(h);
     for (const c of (f.probs || [{ value: f.value, probability: f.probability }])) {
       const bar = el("div", { className: "bar" + (JSON.stringify(c.value) === JSON.stringify(f.value) ? " win" : "") });
-      bar.appendChild(el("span", { title: JSON.stringify(c.value) }, JSON.stringify(c.value)));
+      bar.appendChild(el("span", { title: show(c.value) }, show(c.value)));
       const track = el("div", { className: "track" }), fill = el("div", { className: "fill" });
       fill.style.width = (100 * c.probability).toFixed(1) + "%";
       track.appendChild(fill);
@@ -919,7 +932,7 @@ function renderCompare(runData, out) {
   for (const [name, f] of Object.entries(d.fields)) {
     const eq = JSON.stringify(f.value) === JSON.stringify(c[name]);
     same += eq;
-    const tr = rowOf([name, JSON.stringify(f.value), f.probability.toFixed(3), c[name] === undefined ? "-" : JSON.stringify(c[name]), eq ? "same" : "differs"]);
+    const tr = rowOf([name, show(f.value) + range(f), f.probability.toFixed(3), c[name] === undefined ? "-" : show(c[name]), eq ? "same" : "differs"]);
     tr.lastChild.className = eq ? "same" : "diff";
     tb.appendChild(tr);
   }
@@ -979,7 +992,7 @@ function renderSideBySide(runData, out) {
 
   // out
   const dout = el("div");
-  for (const [n, f] of Object.entries(r.fields)) dout.appendChild(el("div", {}, n + " = " + JSON.stringify(f.value) + "   p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) : "")));
+  for (const [n, f] of Object.entries(r.fields)) dout.appendChild(el("div", {}, n + " = " + show(f.value) + range(f) + "   p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) : "")));
   const cout = el("div");
   cout.appendChild(el("pre", {}, cres.choices[0].message.content));
   const lp = cres.choices[0].logprobs && cres.choices[0].logprobs.content;
