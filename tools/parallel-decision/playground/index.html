@@ -90,6 +90,8 @@
   <h1>Vision Decisions <span class="model" id="model"></span></h1>
   <div style="min-width: 240px; flex: 1 1 240px; max-width: 360px"><label for="url">Server</label><input id="url" type="text" value="http://127.0.0.1:8080"></div>
   <div style="flex: 0 1 180px"><label for="key">API key</label><input id="key" type="password" placeholder="optional" autocomplete="off"></div>
+  <div style="flex: 0 1 200px"><label for="appmode">Mode</label><select id="appmode">
+    <option value="general">General</option><option value="body">Body photo check</option></select></div>
 </header>
 <main>
 <section>
@@ -98,12 +100,17 @@
   <div id="thumbs"></div>
   <label for="text">Text after the images</label>
   <input id="text" type="text" value="Answer the questions about this picture.">
+  <div id="bodyInfo" class="hint" hidden style="margin-top: 10px">Body photo check: one photo of one person, head to feet. The page decides
+    whether it is fit for measuring body sizes. It does not measure anything itself.</div>
+  <details id="schemaBlock" open>
+  <summary class="hint" id="schemaSummary" style="margin-top: 10px">Schema</summary>
   <label for="preset">Schema</label>
   <select id="preset"></select>
   <textarea id="schema" spellcheck="false" style="margin-top: 6px"></textarea>
   <div class="hint" id="schemaState"></div>
+  </details>
   <div class="row">
-    <div><label for="mode">Mode</label><select id="mode"><option>auto</option><option>tree</option><option>greedy</option></select></div>
+    <div><label for="mode">Scoring</label><select id="mode"><option>auto</option><option>tree</option><option>greedy</option></select></div>
     <div><label for="temp">Temperature</label><input id="temp" type="number" value="1" min="0.25" max="10" step="0.05"></div>
     <div><label for="minp">Abstain below p</label><input id="minp" type="number" value="0" min="0" max="1" step="0.05"></div>
     <div><label for="minm">Abstain below margin</label><input id="minm" type="number" value="0" min="0" max="1" step="0.05"></div>
@@ -150,11 +157,33 @@ const PRESETS = {
     count: { type: "integer", minimum: 0, maximum: 4, description: "How many shapes are there?" },
     dark_background: { type: "boolean", description: "Is the background dark?" }
   },
+  "Body photo check": {
+    person_count: { type: "integer", minimum: 0, maximum: 3, description: "How many people are visible?", abstain: { min_probability: 0.8 } },
+    full_body_visible: { type: "boolean", description: "Is the whole person visible from head to feet?", abstain: { min_probability: 0.8 } },
+    view: { type: "enum", choices: ["front", "side", "back", "angled", "no_person"], description: "From which side is the person photographed?", abstain: { min_probability: 0.8 } },
+    standing_straight: { type: "boolean", description: "Is the person standing straight and upright?", abstain: { min_probability: 0.8 } },
+    arms_away: { type: "boolean", description: "Are the arms held slightly away from the body?" },
+    clothing: { type: "enum", choices: ["tight", "normal", "loose", "no_person"], description: "How close-fitting is the clothing?" },
+    reference_object: { type: "enum", choices: ["a4_paper", "door_frame", "credit_card", "other", "none"], description: "Is an object of known size visible next to the person?" },
+    sharp: { type: "boolean", description: "Is the image sharp and not blurry?", abstain: { min_probability: 0.8 } },
+    lighting: { type: "enum", choices: ["good", "dim", "backlit", "harsh"], description: "How is the lighting on the person?" },
+    distorted: { type: "boolean", description: "Is the body distorted by a wide-angle lens or a camera held too close?", abstain: { min_probability: 0.8 } }
+  },
   "Document": {
     is_document: { type: "boolean", description: "Is this a photo or scan of a document?" },
     kind: { type: "enum", choices: ["invoice", "letter", "form", "receipt", "id_card", "other", "none"], description: "What kind of document is it?" },
     readable: { type: "enum", choices: ["good", "partly", "no"], description: "How readable is the text?" },
     handwriting: { type: "boolean", description: "Does it contain handwriting?" }
+  }
+};
+// preset checks that turn the fields into one verdict; a field listed here must match and must not abstain
+const GATES = {
+  "Body photo check": {
+    title: "Photo suitable for measuring",
+    rules: { person_count: [1], full_body_visible: [true], view: ["front", "side"], standing_straight: [true], sharp: [true], distorted: [false] },
+    hints: { reference_object: ["none"], clothing: ["loose"], arms_away: [false] },
+    hint_text: { reference_object: "no reference object: the scale must come from a known body height",
+                 clothing: "loose clothing hides the body outline", arms_away: "arms against the body hide the waist" }
   }
 };
 let images = [];
@@ -200,6 +229,28 @@ function checkSchema() {
   }
 }
 checkSchema();
+
+function applyMode() {
+  const body = $("appmode").value === "body";
+  $("bodyInfo").hidden = !body;
+  if (body) {
+    $("preset").value = "Body photo check";
+    $("schema").value = JSON.stringify(PRESETS["Body photo check"], null, 2);
+    $("runas").value = "decision";
+    $("schemaBlock").open = false;
+    $("schemaSummary").textContent = "Schema (fixed for this mode, open to look)";
+    checkSchema();
+  } else {
+    $("schemaSummary").textContent = "Schema";
+    $("schemaBlock").open = true;
+  }
+  $("preset").disabled = body;
+  $("schema").readOnly = body;
+  $("runas").disabled = body;
+  store("dp.mode", $("appmode").value);
+}
+$("appmode").value = load("dp.mode", "general");
+$("appmode").addEventListener("change", applyMode);
 
 async function showModel() {
   try {
@@ -368,7 +419,7 @@ async function run() {
     wait.textContent = step + " " + s.toFixed(0) + " s" + (s > 20 ? " (the server is still working; large images take long on a CPU)" : "");
   }, 1000);
   try {
-    const runData = { mode, at: new Date().toISOString(), images: lastSizes, request: redacted(body) };
+    const runData = { mode, at: new Date().toISOString(), images: lastSizes, request: redacted(body), preset: $("preset").value };
     if (mode !== "chat") {
       step = "decision...";
       const d = await post("/v1/decision", body);
@@ -411,6 +462,40 @@ $("clearHistory").onclick = () => {
 // ---- rendering
 function renderDecision(runData, out) {
   const res = runData.response, r = res.results[0];
+  const gate = GATES[runData.preset];
+  if (gate) {
+    const failed = [], unsure = [], notes = [];
+    for (const [k, ok] of Object.entries(gate.rules)) {
+      const f = r.fields[k];
+      if (!f) continue;
+      if (f.abstain) unsure.push(k + " (p " + f.probability.toFixed(2) + ")");
+      else if (!ok.some((v) => JSON.stringify(v) === JSON.stringify(f.value))) failed.push(k + " = " + JSON.stringify(f.value));
+    }
+    for (const [k, bad] of Object.entries(gate.hints || {})) {
+      const f = r.fields[k];
+      if (f && bad.some((v) => JSON.stringify(v) === JSON.stringify(f.value))) notes.push(gate.hint_text[k]);
+    }
+    const verdict = failed.length ? "no" : unsure.length ? "unsure" : "yes";
+    const box = el("div", { className: "cols" });
+    const v = el("div");
+    v.appendChild(el("h3", {}, gate.title));
+    v.appendChild(el("div", { className: "big " + (verdict === "yes" ? "same" : "diff") }, verdict === "yes" ? "yes" : verdict === "no" ? "no" : "unsure - take it again or check"));
+    const tb = el("table");
+    tb.appendChild(rowOf(["check", "wanted", "model says", "p", ""], "th"));
+    for (const [k, ok] of Object.entries(gate.rules)) {
+      const f = r.fields[k];
+      if (!f) continue;
+      const pass = ok.some((x) => JSON.stringify(x) === JSON.stringify(f.value));
+      const status = f.abstain ? "? unsure" : pass ? "ok" : "x fails";
+      const tr = rowOf([k, ok.map((x) => JSON.stringify(x)).join(" or "), JSON.stringify(f.value), f.probability.toFixed(2), status]);
+      tr.lastChild.className = f.abstain ? "diff" : pass ? "same" : "diff";
+      tb.appendChild(tr);
+    }
+    v.appendChild(tb);
+    if (notes.length) v.appendChild(el("div", { className: "hint" }, "notes: " + notes.join("; ")));
+    box.appendChild(v);
+    out.appendChild(box);
+  }
   out.appendChild(el("div", { className: "decision" }, JSON.stringify(r.decision, null, 1)));
   if (r.abstained) {
     out.appendChild(el("p", { className: r.abstained.length ? "err" : "hint" },
@@ -723,6 +808,7 @@ function drawHistory() {
   }
 }
 drawHistory();
+applyMode();
 </script>
 </body>
 </html>

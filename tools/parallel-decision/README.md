@@ -337,5 +337,8 @@ built into the server). Drop, paste or pick images (scaled down in the browser, 
 would cost thousands of image tokens and minutes on a CPU), choose or edit a schema, run it as a decision, as a chat completion with a `json_schema` response, or both side by side (per-field agreement and time; the chat trace lists every generated token with its probability and alternatives), and get the decision with every value's
 probability, margin and abstain marks, a time bar (image encode, prefill, field scoring), and the trace: what happened
 step by step, the prompt as the model sees it, the chunks and positions, the fields as scored, and the raw request and
-response. A trace downloads as JSON; the last runs stay in the browser's history. The page is public like the web UI;
+response. The "Body photo check" mode fixes a schema that decides whether a photo is fit for measuring body sizes (one person, head
+to feet, front or side view, standing straight, sharp, not distorted) and shows one verdict (yes / no / unsure) with a
+checklist; it does not measure anything, and its fields should be calibrated on real photos before use. A trace
+downloads as JSON; the last runs stay in the browser's history. The page is public like the web UI;
 with `--api-key`, enter the key in the page (it is not stored), since `/v1/decision` still checks it.
