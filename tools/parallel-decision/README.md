@@ -339,6 +339,9 @@ probability, margin and abstain marks, a time bar (image encode, prefill, field 
 step by step, the prompt as the model sees it, the chunks and positions, the fields as scored, and the raw request and
 response. The "Body photo check" mode fixes a schema that decides whether a photo is fit for measuring body sizes (one person, head
 to feet, front or side view, standing straight, sharp, not distorted) and shows one verdict (yes / no / unsure) with a
-checklist; it does not measure anything, and its fields should be calibrated on real photos before use. A trace
+checklist; it does not measure anything, and its fields should be calibrated on real photos before use. With the webcam as source, the
+page takes a frame every 1-30 s (or on demand), scales it like an upload and decides it; frames that would overlap a
+running request are skipped and counted, the tab pauses when hidden, and live frames are logged but not kept in the
+history. Browsers allow the camera only on localhost / 127.0.0.1 or over https. A trace
 downloads as JSON; the last runs stay in the browser's history. The page is public like the web UI;
 with `--api-key`, enter the key in the page (it is not stored), since `/v1/decision` still checks it.

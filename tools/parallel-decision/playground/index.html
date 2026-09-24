@@ -83,6 +83,11 @@
   .side > .head { font-weight: 600; font-size: 13px; }
   @media (max-width: 700px) { .side { grid-template-columns: minmax(0, 1fr); } .side > .lab { padding-top: 12px; } }
   .check { font-size: 12px; margin-top: 8px; }
+  #cam { width: 100%; max-height: 320px; background: #000; border-radius: 6px; display: block; }
+  .log { font-family: ui-monospace, monospace; font-size: 11px; background: var(--soft); border-radius: 6px; padding: 6px 8px;
+         max-height: 220px; overflow: auto; margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+  .log .bad { color: var(--warn); } .log .good { color: var(--ok); }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 4px; }
 </style>
 </head>
 <body>
@@ -96,8 +101,29 @@
 <main>
 <section>
   <h2>Input</h2>
-  <div id="drop" tabindex="0">Drop images here, paste them, or click to choose<input id="files" type="file" accept="image/*" multiple hidden></div>
-  <div id="thumbs"></div>
+  <div class="row">
+    <div><label for="source">Source</label><select id="source"><option value="images">Images</option><option value="webcam">Webcam</option></select></div>
+  </div>
+  <div id="imageBlock">
+    <div id="drop" tabindex="0" style="margin-top: 10px">Drop images here, paste them, or click to choose<input id="files" type="file" accept="image/*" multiple hidden></div>
+    <div id="thumbs"></div>
+  </div>
+  <div id="camBlock" hidden>
+    <video id="cam" autoplay playsinline muted style="margin-top: 10px"></video>
+    <div class="row">
+      <div><label for="camera">Camera</label><select id="camera"><option value="">default</option></select></div>
+      <div><label for="interval">Every</label><select id="interval">
+        <option value="0">manual</option><option value="1000">1 s</option><option value="2000" selected>2 s</option>
+        <option value="5000">5 s</option><option value="10000">10 s</option><option value="30000">30 s</option></select></div>
+    </div>
+    <div class="actions">
+      <button id="camStart" class="ghost">start camera</button>
+      <button id="liveStart" disabled>start live</button>
+      <button id="snap" class="ghost" disabled>analyse one frame</button>
+    </div>
+    <div id="liveState" class="hint" style="margin-top: 6px">Camera frames stay on this machine; live frames are not kept in the history.</div>
+    <div id="liveLog" class="log" hidden></div>
+  </div>
   <label for="text">Text after the images</label>
   <input id="text" type="text" value="Answer the questions about this picture.">
   <div id="bodyInfo" class="hint" hidden style="margin-top: 10px">Body photo check: one photo of one person, head to feet. The page decides
@@ -399,10 +425,16 @@ async function post(path, body) {
   return { js, ms: performance.now() - t0 };
 }
 
-async function run() {
-  if ($("run").disabled) return;
+async function run(opts) {
+  opts = opts || {};
+  if ($("run").disabled) return false;
+  if ($("source").value === "webcam") {
+    const frame = grabFrame();
+    if (!frame) { showError("start the camera first"); return false; }
+    images = [{ name: "webcam " + new Date().toLocaleTimeString(), url: frame }];
+  }
   const body = await buildRequest();
-  if (!body) return;
+  if (!body) return false;
   store("dp.preset", $("preset").value); store("dp.schema", $("schema").value);
   const mode = $("runas").value;
   $("run").disabled = true;
@@ -442,17 +474,140 @@ async function run() {
     }
     last = runData;
     render(runData);
-    remember(runData);
+    if (opts.live) logLive(runData, performance.now() - t0); else remember(runData);
   } catch (e) {
     out.innerHTML = "";
     out.appendChild(el("h2", {}, "Result"));
     out.appendChild(el("p", { className: "err" }, String(e.message || e)));
+    if (opts.live) logLine(new Date().toLocaleTimeString() + "  error: " + (e.message || e), "bad");
   } finally {
     clearInterval(tick);
     $("run").disabled = false;
   }
 }
-$("run").onclick = run;
+$("run").onclick = () => run();
+function showError(msg) {
+  const out = $("out");
+  out.innerHTML = "";
+  out.appendChild(el("h2", {}, "Result"));
+  out.appendChild(el("p", { className: "err" }, msg));
+}
+
+// ---- webcam
+let stream = null, liveTimer = null, busy = false, skipped = 0, frames = 0;
+function grabFrame() {
+  const v = $("cam");
+  if (!stream || !v.videoWidth) return null;
+  const maxSide = parseInt($("maxside").value, 10) || Math.max(v.videoWidth, v.videoHeight);
+  const s = Math.min(1, maxSide / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.round(v.videoWidth * s); c.height = Math.round(v.videoHeight * s);
+  c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.9);
+}
+async function listCameras() {
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+    const sel = $("camera"), cur = sel.value;
+    sel.innerHTML = "";
+    sel.appendChild(el("option", { value: "" }, "default"));
+    devs.forEach((d, i) => sel.appendChild(el("option", { value: d.deviceId }, d.label || "camera " + (i + 1))));
+    sel.value = cur;
+  } catch (e) { /* no device list */ }
+}
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $("liveState").textContent = "No camera access here: browsers allow it only on localhost / 127.0.0.1 or https.";
+    return;
+  }
+  stopCamera();
+  try {
+    const id = $("camera").value;
+    stream = await navigator.mediaDevices.getUserMedia({ video: id ? { deviceId: { exact: id } } : { width: { ideal: 1280 } }, audio: false });
+    $("cam").srcObject = stream;
+    await listCameras();
+    $("camStart").textContent = "stop camera";
+    $("liveStart").disabled = false; $("snap").disabled = false;
+    $("liveState").textContent = "Camera on. Frames stay on this machine; live frames are not kept in the history.";
+  } catch (e) {
+    $("liveState").textContent = "Camera not available: " + (e.message || e.name);
+  }
+}
+function stopCamera() {
+  stopLive();
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null;
+  $("cam").srcObject = null;
+  $("camStart").textContent = "start camera";
+  $("liveStart").disabled = true; $("snap").disabled = true;
+}
+async function tick() {
+  if (document.hidden) return; // paused while the tab is not visible
+  if (busy || $("run").disabled) { skipped++; updateLiveState(); return; }
+  busy = true;
+  frames++;
+  try { await run({ live: true }); } finally { busy = false; updateLiveState(); }
+}
+function updateLiveState() {
+  if (!liveTimer) return;
+  $("liveState").innerHTML = "";
+  $("liveState").appendChild(el("span", { className: "live-dot" }));
+  $("liveState").appendChild(document.createTextNode("live every " + $("interval").selectedOptions[0].text + ": " + frames + " frames analysed, " + skipped + " skipped because the previous one was still running"));
+}
+function startLive() {
+  const every = parseInt($("interval").value, 10);
+  if (!every) { tick(); return; }
+  stopLive();
+  frames = 0; skipped = 0;
+  $("liveLog").hidden = false;
+  liveTimer = setInterval(tick, every);
+  $("liveStart").textContent = "stop live";
+  updateLiveState();
+  tick();
+}
+function stopLive() {
+  if (!liveTimer) return;
+  clearInterval(liveTimer);
+  liveTimer = null;
+  $("liveStart").textContent = "start live";
+  $("liveState").textContent = "live stopped: " + frames + " frames analysed, " + skipped + " skipped" + (busy ? "; the last frame is still being analysed" : "");
+}
+function logLine(text, cls) {
+  const log = $("liveLog");
+  log.hidden = false;
+  const line = el("div", { className: cls || "" }, text);
+  log.insertBefore(line, log.firstChild);
+  while (log.childNodes.length > 50) log.removeChild(log.lastChild);
+}
+function logLive(runData, wall) {
+  const res = runData.response;
+  const r = res ? res.results[0] : null;
+  const gate = r && GATES[runData.preset];
+  let verdict = "", cls = "";
+  if (gate) {
+    const bad = Object.entries(gate.rules).some(([k, ok]) => r.fields[k] && !r.fields[k].abstain && !ok.some((x) => JSON.stringify(x) === JSON.stringify(r.fields[k].value)));
+    const unsure = Object.keys(gate.rules).some((k) => r.fields[k] && r.fields[k].abstain);
+    verdict = bad ? " -> no" : unsure ? " -> unsure" : " -> yes";
+    cls = bad || unsure ? "bad" : "good";
+  }
+  const vals = r ? Object.entries(r.fields).map(([k, f]) => k + "=" + JSON.stringify(f.value) + (f.abstain ? "?" : "")).join(" ") : JSON.stringify(chatValues(runData));
+  logLine(new Date().toLocaleTimeString() + "  " + (wall / 1000).toFixed(2) + " s  " + vals + verdict, cls);
+}
+$("source").onchange = () => {
+  const cam = $("source").value === "webcam";
+  $("imageBlock").hidden = cam;
+  $("camBlock").hidden = !cam;
+  if (!cam) stopCamera();
+  store("dp.source", $("source").value);
+};
+$("camStart").onclick = () => (stream ? stopCamera() : startCamera());
+$("camera").onchange = () => { if (stream) startCamera(); };
+$("liveStart").onclick = () => (liveTimer ? stopLive() : startLive());
+$("interval").onchange = () => { if (liveTimer) startLive(); };
+$("snap").onclick = () => run();
+document.addEventListener("visibilitychange", updateLiveState);
+$("source").value = load("dp.source", "images");
+$("source").onchange();
 $("clearHistory").onclick = () => {
   try { localStorage.removeItem("dp.history"); } catch (e) { /* storage off */ }
   $("history").innerHTML = "";
