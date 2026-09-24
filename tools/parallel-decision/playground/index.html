@@ -70,6 +70,12 @@
   #history { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
   #history button { background: var(--soft); color: var(--fg); padding: 4px; border: 1px solid var(--line); flex: 0 0 auto; text-align: left; font-size: 11px; width: 120px; }
   #history img { width: 100%; height: 56px; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 2px; }
+  .same { color: var(--ok); } .diff { color: var(--warn); font-weight: 600; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .cols > div { background: var(--soft); border-radius: 6px; padding: 8px; min-width: 0; }
+  .cols h3 { font-size: 13px; margin: 0 0 4px; }
+  .big { font-size: 20px; font-weight: 600; }
+  .tok { font-family: ui-monospace, monospace; white-space: pre; }
 </style>
 </head>
 <body>
@@ -101,6 +107,12 @@
       <option value="1536">1536 px</option><option value="0">original</option></select></div>
   </div>
   <div class="hint">Images are scaled down in the browser before sending. Big photos cost many image tokens and take minutes on a CPU.</div>
+  <div class="row">
+    <div><label for="runas">Run as</label><select id="runas">
+      <option value="decision">Decision (/v1/decision)</option>
+      <option value="chat">Chat with json_schema</option>
+      <option value="compare">Compare both</option></select></div>
+  </div>
   <div class="actions">
     <button id="run">Decide</button>
     <label class="hint" style="margin: 0"><input id="trace" type="checkbox" checked> trace</label>
@@ -266,30 +278,79 @@ function redacted(body) {
   return copy;
 }
 
+function jsonSchemaOf(schema) {
+  // the same fields as a JSON Schema for the chat response format
+  const props = {};
+  for (const [name, f] of Object.entries(schema)) {
+    if (f.properties) return schema;
+    const c = f.choices || f.enum;
+    if (c) props[name] = { type: "string", enum: c };
+    else if (f.type === "integer") props[name] = { type: "integer", minimum: f.minimum, maximum: f.maximum };
+    else if (f.type === "number") props[name] = { type: "number", minimum: f.minimum, maximum: f.maximum };
+    else props[name] = { type: "boolean" };
+  }
+  return { type: "object", properties: props, required: Object.keys(props), additionalProperties: false };
+}
+function allowedOf(f) {
+  if (f.choices || f.enum) return (f.choices || f.enum).map((v) => JSON.stringify(v)).join(", ");
+  if (f.type === "integer") return f.minimum + " to " + f.maximum;
+  if (f.type === "number") return f.minimum + " to " + f.maximum + " in steps of " + f.step;
+  return "true, false";
+}
+function chatRequest(body) {
+  // same images, fields, descriptions and allowed values as the decision
+  const parts = Array.isArray(body.contexts[0]) ? body.contexts[0].filter((p) => p.type === "image_url") : [];
+  const fields = Object.entries(body.schema).map(([n, f]) => "- " + n + ": " + (f.description || "") + " Allowed values: " + allowedOf(f)).join("\n");
+  const text = (($("text").value || "") + "\nAnswer as JSON with these fields:\n" + fields).trim();
+  return { messages: [{ role: "user", content: parts.concat([{ type: "text", text }]) }], temperature: 0,
+           max_tokens: 64 + 32 * Object.keys(body.schema).length, logprobs: true, top_logprobs: 5,
+           response_format: { type: "json_schema", json_schema: { schema: jsonSchemaOf(body.schema) } },
+           chat_template_kwargs: { enable_thinking: false }, cache_prompt: body.cache_prompt };
+}
+async function post(path, body) {
+  const t0 = performance.now();
+  const r = await fetch(base() + path, { method: "POST", headers: headers(), body: JSON.stringify(body) });
+  const js = await r.json();
+  if (!r.ok) throw new Error(path + ": " + ((js.error && js.error.message) || r.statusText));
+  return { js, ms: performance.now() - t0 };
+}
+
 async function run() {
   if ($("run").disabled) return;
   const body = await buildRequest();
   if (!body) return;
   store("dp.preset", $("preset").value); store("dp.schema", $("schema").value);
+  const mode = $("runas").value;
   $("run").disabled = true;
   const out = $("out");
   out.innerHTML = "";
   out.appendChild(el("h2", {}, "Result"));
-  const wait = el("p", { className: "hint" }, "deciding...");
+  const wait = el("p", { className: "hint" }, "working...");
   out.appendChild(wait);
   if (lastSizes.length) out.appendChild(el("p", { className: "hint" }, "images: " + lastSizes.join(", ")));
   const t0 = performance.now();
+  let step = "";
   const tick = setInterval(() => {
     const s = (performance.now() - t0) / 1000;
-    wait.textContent = "deciding... " + s.toFixed(0) + " s" + (s > 20 ? " (the server is still working; large images take long on a CPU)" : "");
+    wait.textContent = step + " " + s.toFixed(0) + " s" + (s > 20 ? " (the server is still working; large images take long on a CPU)" : "");
   }, 1000);
   try {
-    const r = await fetch(base() + "/v1/decision", { method: "POST", headers: headers(), body: JSON.stringify(body) });
-    const js = await r.json();
-    if (!r.ok) throw new Error((js.error && js.error.message) || r.statusText);
-    last = { request: redacted(body), response: js, round_trip_ms: performance.now() - t0, at: new Date().toISOString(), images: lastSizes };
-    render(last);
-    remember(last);
+    const runData = { mode, at: new Date().toISOString(), images: lastSizes, request: redacted(body) };
+    if (mode !== "chat") {
+      step = "decision...";
+      const d = await post("/v1/decision", body);
+      runData.response = d.js;
+      runData.round_trip_ms = d.ms;
+    }
+    if (mode !== "decision") {
+      step = mode === "compare" ? "decision done, chat..." : "chat...";
+      const creq = chatRequest(body);
+      const c = await post("/v1/chat/completions", creq);
+      runData.chat = { request: redacted({ contexts: [creq.messages[0].content], rest: Object.assign({}, creq, { messages: undefined }) }), response: c.js, round_trip_ms: c.ms };
+    }
+    last = runData;
+    render(runData);
+    remember(runData);
   } catch (e) {
     out.innerHTML = "";
     out.appendChild(el("h2", {}, "Result"));
@@ -307,24 +368,8 @@ $("clearHistory").onclick = () => {
 };
 
 // ---- rendering
-function render(runData) {
-  const res = runData.response, r = res.results[0], out = $("out");
-  out.innerHTML = "";
-  const head = el("div", { className: "actions" });
-  head.style.marginTop = "0";
-  head.appendChild(el("h2", { style: "margin: 0 auto 0 0" }, "Result"));
-  const copy = el("button", { className: "ghost" }, "copy JSON");
-  copy.onclick = () => navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(runData, null, 2));
-  const dl = el("button", { className: "ghost" }, "download trace");
-  dl.onclick = () => {
-    const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(runData, null, 2)], { type: "application/json" })), download: "decision-trace.json" });
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-  head.appendChild(copy);
-  head.appendChild(dl);
-  out.appendChild(head);
-
+function renderDecision(runData, out) {
+  const res = runData.response, r = res.results[0];
   out.appendChild(el("div", { className: "decision" }, JSON.stringify(r.decision, null, 1)));
   if (r.abstained) {
     out.appendChild(el("p", { className: r.abstained.length ? "err" : "hint" },
@@ -431,6 +476,91 @@ function render(runData) {
   raw.appendChild(el("pre", {}, "request " + JSON.stringify(runData.request, null, 1) + "\n\nresponse " + JSON.stringify(res, null, 1)));
   out.appendChild(raw);
 }
+function chatValues(runData) {
+  try { return JSON.parse(runData.chat.response.choices[0].message.content); } catch (e) { return null; }
+}
+function renderChat(runData, out, withHeader) {
+  const res = runData.chat.response, t = res.timings || {};
+  const vals = chatValues(runData);
+  if (withHeader) out.appendChild(el("h2", { style: "margin-top: 16px" }, "Chat with json_schema"));
+  out.appendChild(el("div", { className: "decision" }, vals ? JSON.stringify(vals, null, 1) : res.choices[0].message.content));
+  out.appendChild(el("p", { className: "hint" }, "The model writes the JSON token by token under a grammar from the schema. There is no probability per field; the tokens below show what it generated."));
+  const prompt = t.prompt_ms || 0, gen = t.predicted_ms || 0, total = prompt + gen;
+  if (total > 0) {
+    const tl = el("div", { className: "timeline", title: "server " + ms(total) });
+    const legend = el("div", { className: "legend" });
+    for (const [label, v, color] of [["prompt incl. image " + (t.prompt_n || 0) + " tokens", prompt, "--seg1"], ["generation " + (t.predicted_n || 0) + " tokens", gen, "--seg3"]]) {
+      const d = el("div"); d.style.width = (100 * v / total).toFixed(2) + "%"; d.style.background = "var(" + color + ")"; tl.appendChild(d);
+      const item = el("span"), sw = el("i"); sw.style.background = "var(" + color + ")"; item.appendChild(sw);
+      item.appendChild(document.createTextNode(label + " " + ms(v))); legend.appendChild(item);
+    }
+    legend.appendChild(el("span", {}, "server " + ms(total) + ", round trip " + ms(runData.chat.round_trip_ms)));
+    out.appendChild(tl); out.appendChild(legend);
+  }
+  const lp = res.choices[0].logprobs && res.choices[0].logprobs.content;
+  if (lp && lp.length) {
+    const det = el("details");
+    det.appendChild(el("summary", {}, "Generated tokens (" + lp.length + ")"));
+    const w = el("div", { className: "table-wrap" }), tb = el("table");
+    tb.appendChild(rowOf(["#", "token", "p", "alternatives"], "th"));
+    lp.forEach((x, i) => {
+      const alts = (x.top_logprobs || []).filter((a) => a.token !== x.token).slice(0, 4).map((a) => JSON.stringify(a.token) + " " + Math.exp(a.logprob).toFixed(3)).join(", ");
+      const tr = rowOf([i + 1, JSON.stringify(x.token), Math.exp(x.logprob).toFixed(3), alts]);
+      tr.children[1].className = "tok";
+      tb.appendChild(tr);
+    });
+    w.appendChild(tb); det.appendChild(w); out.appendChild(det);
+  }
+  const raw = el("details");
+  raw.appendChild(el("summary", {}, "Raw chat request and response"));
+  raw.appendChild(el("pre", {}, "request " + JSON.stringify(runData.chat.request, null, 1) + "\n\nresponse " + JSON.stringify(res, null, 1)));
+  out.appendChild(raw);
+}
+function renderCompare(runData, out) {
+  const d = runData.response.results[0], c = chatValues(runData) || {};
+  const dt = runData.response.timings.total_ms, ct = runData.chat.response.timings ? runData.chat.response.timings.prompt_ms + runData.chat.response.timings.predicted_ms : runData.chat.round_trip_ms;
+  out.appendChild(el("h2", { style: "margin-top: 8px" }, "Comparison"));
+  const cols = el("div", { className: "cols" });
+  const a = el("div"); a.appendChild(el("h3", {}, "Decision")); a.appendChild(el("div", { className: "big" }, ms(dt))); a.appendChild(el("div", { className: "hint" }, "scores all values, probability per field"));
+  const b = el("div"); b.appendChild(el("h3", {}, "Chat with json_schema")); b.appendChild(el("div", { className: "big" }, ms(ct))); b.appendChild(el("div", { className: "hint" }, "generates the JSON token by token"));
+  cols.appendChild(a); cols.appendChild(b); out.appendChild(cols);
+  const w = el("div", { className: "table-wrap" }), tb = el("table");
+  tb.appendChild(rowOf(["field", "decision", "p", "chat", ""], "th"));
+  let same = 0;
+  for (const [name, f] of Object.entries(d.fields)) {
+    const eq = JSON.stringify(f.value) === JSON.stringify(c[name]);
+    same += eq;
+    const tr = rowOf([name, JSON.stringify(f.value), f.probability.toFixed(3), c[name] === undefined ? "-" : JSON.stringify(c[name]), eq ? "same" : "differs"]);
+    tr.lastChild.className = eq ? "same" : "diff";
+    tb.appendChild(tr);
+  }
+  w.appendChild(tb); out.appendChild(w);
+  out.appendChild(el("p", { className: "hint" }, same + " of " + Object.keys(d.fields).length + " fields agree; decision took " + (ct / Math.max(dt, 1)).toFixed(1) + "x less server time than chat."));
+}
+function render(runData) {
+  const out = $("out");
+  out.innerHTML = "";
+  const head = el("div", { className: "actions" });
+  head.style.marginTop = "0";
+  head.appendChild(el("h2", { style: "margin: 0 auto 0 0" }, "Result"));
+  const copy = el("button", { className: "ghost" }, "copy JSON");
+  copy.onclick = () => navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(runData, null, 2));
+  const dl = el("button", { className: "ghost" }, "download trace");
+  dl.onclick = () => {
+    const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(runData, null, 2)], { type: "application/json" })), download: "decision-trace.json" });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  head.appendChild(copy);
+  head.appendChild(dl);
+  out.appendChild(head);
+  if (runData.response && runData.chat) renderCompare(runData, out);
+  if (runData.response) {
+    if (runData.chat) out.appendChild(el("h2", { style: "margin-top: 16px" }, "Decision"));
+    renderDecision(runData, out);
+  }
+  if (runData.chat) renderChat(runData, out, !!runData.response);
+}
 function rowOf(cells, tag) {
   const tr = el("tr");
   for (const c of cells) tr.appendChild(el(tag || "td", {}, String(c)));
@@ -466,8 +596,8 @@ function drawHistory() {
   for (const entry of h) {
     const b = el("button", { title: entry.run.at });
     if (entry.thumb) b.appendChild(el("img", { src: entry.thumb, alt: "" }));
-    const d = entry.run.response.results[0].decision;
-    b.appendChild(el("span", {}, Object.values(d).slice(0, 3).map((v) => JSON.stringify(v)).join(" ")));
+    const d = entry.run.response ? entry.run.response.results[0].decision : (chatValues(entry.run) || {});
+    b.appendChild(el("span", {}, (entry.run.mode && entry.run.mode !== "decision" ? entry.run.mode + ": " : "") + Object.values(d).slice(0, 3).map((v) => JSON.stringify(v)).join(" ")));
     b.onclick = () => { last = entry.run; render(entry.run); };
     box.appendChild(b);
   }
