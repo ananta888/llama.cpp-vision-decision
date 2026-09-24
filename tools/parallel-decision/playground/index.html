@@ -88,6 +88,12 @@
          max-height: 220px; overflow: auto; margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
   .log .bad { color: var(--warn); } .log .good { color: var(--ok); }
   .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 4px; }
+  #liveView table td { vertical-align: middle; }
+  #liveView .fill { transition: width .35s ease; }
+  #liveView .val { font-family: ui-monospace, monospace; transition: background-color .6s ease; border-radius: 3px; padding: 0 3px; }
+  #liveView .val.flash { background-color: var(--seg1); color: var(--accent-fg); transition: none; }
+  #liveView .busy { visibility: hidden; } #liveView .busy.on { visibility: visible; }
+  #liveView .track { min-width: 80px; }
 </style>
 </head>
 <body>
@@ -437,19 +443,23 @@ async function run(opts) {
   if (!body) return false;
   store("dp.preset", $("preset").value); store("dp.schema", $("schema").value);
   const mode = $("runas").value;
-  $("run").disabled = true;
   const out = $("out");
-  out.innerHTML = "";
-  out.appendChild(el("h2", {}, "Result"));
-  const wait = el("p", { className: "hint" }, "working...");
-  out.appendChild(wait);
-  if (lastSizes.length) out.appendChild(el("p", { className: "hint" }, "images: " + lastSizes.join(", ")));
   const t0 = performance.now();
-  let step = "";
-  const tick = setInterval(() => {
-    const s = (performance.now() - t0) / 1000;
-    wait.textContent = step + " " + s.toFixed(0) + " s" + (s > 20 ? " (the server is still working; large images take long on a CPU)" : "");
-  }, 1000);
+  let step = "", tick = null;
+  if (opts.live) {
+    liveBusy(true);
+  } else {
+    $("run").disabled = true;
+    out.innerHTML = "";
+    out.appendChild(el("h2", {}, "Result"));
+    const wait = el("p", { className: "hint" }, "working...");
+    out.appendChild(wait);
+    if (lastSizes.length) out.appendChild(el("p", { className: "hint" }, "images: " + lastSizes.join(", ")));
+    tick = setInterval(() => {
+      const s = (performance.now() - t0) / 1000;
+      wait.textContent = step + " " + s.toFixed(0) + " s" + (s > 20 ? " (the server is still working; large images take long on a CPU)" : "");
+    }, 1000);
+  }
   try {
     const runData = { mode, at: new Date().toISOString(), images: lastSizes, request: redacted(body), preset: $("preset").value };
     if (mode !== "chat") {
@@ -473,16 +483,24 @@ async function run(opts) {
       } catch (e) { runData.chat.prompt = null; }
     }
     last = runData;
-    render(runData);
-    if (opts.live) logLive(runData, performance.now() - t0); else remember(runData);
+    if (opts.live) {
+      renderLive(runData, performance.now() - t0);
+      logLive(runData, performance.now() - t0);
+    } else {
+      render(runData);
+      remember(runData);
+    }
   } catch (e) {
-    out.innerHTML = "";
-    out.appendChild(el("h2", {}, "Result"));
-    out.appendChild(el("p", { className: "err" }, String(e.message || e)));
-    if (opts.live) logLine(new Date().toLocaleTimeString() + "  error: " + (e.message || e), "bad");
+    if (opts.live) {
+      logLine(new Date().toLocaleTimeString() + "  error: " + (e.message || e), "bad");
+      const st = document.getElementById("liveStamp");
+      if (st) st.textContent = "error: " + (e.message || e);
+    } else {
+      showError(String(e.message || e));
+    }
   } finally {
-    clearInterval(tick);
-    $("run").disabled = false;
+    if (tick) clearInterval(tick);
+    if (opts.live) liveBusy(false); else $("run").disabled = false;
   }
 }
 $("run").onclick = () => run();
@@ -543,7 +561,7 @@ function stopCamera() {
 }
 async function tick() {
   if (document.hidden) return; // paused while the tab is not visible
-  if (busy || $("run").disabled) { skipped++; updateLiveState(); return; }
+  if (busy || $("run").disabled) { skipped++; updateLiveState(); return; } // a manual run also blocks
   busy = true;
   frames++;
   try { await run({ live: true }); } finally { busy = false; updateLiveState(); }
@@ -571,6 +589,96 @@ function stopLive() {
   liveTimer = null;
   $("liveStart").textContent = "start live";
   $("liveState").textContent = "live stopped: " + frames + " frames analysed, " + skipped + " skipped" + (busy ? "; the last frame is still being analysed" : "");
+}
+// ---- live view: built once, then only the cells change
+let liveKey = "";
+function liveBusy(on) {
+  const b = document.getElementById("liveBusy");
+  if (b) b.classList.toggle("on", on);
+}
+function fieldValues(runData) {
+  // {name: {value, p, margin, abstain}} from the decision, or the chat values without probabilities
+  const out = {};
+  if (runData.response) {
+    for (const [k, f] of Object.entries(runData.response.results[0].fields)) out[k] = { value: f.value, p: f.probability, margin: f.margin, abstain: f.abstain };
+  } else {
+    for (const [k, v] of Object.entries(chatValues(runData) || {})) out[k] = { value: v };
+  }
+  return out;
+}
+function buildLiveView(names, runData) {
+  const out = $("out");
+  out.innerHTML = "";
+  const view = el("div", { id: "liveView" });
+  const head = el("div", { className: "actions" });
+  head.style.marginTop = "0";
+  head.appendChild(el("h2", { style: "margin: 0 auto 0 0" }, "Live"));
+  head.appendChild(el("span", { id: "liveBusy", className: "busy hint" }, "analysing..."));
+  const full = el("button", { className: "ghost" }, "full trace of this frame");
+  full.onclick = () => { stopLive(); render(last); liveKey = ""; };
+  head.appendChild(full);
+  view.appendChild(head);
+  view.appendChild(el("div", { id: "liveStamp", className: "hint" }, ""));
+  if (GATES[runData.preset]) {
+    const box = el("div", { className: "cols", style: "margin-top: 8px" });
+    const v = el("div");
+    v.appendChild(el("h3", {}, GATES[runData.preset].title));
+    v.appendChild(el("div", { id: "liveVerdict", className: "big" }, ""));
+    v.appendChild(el("div", { id: "liveVerdictWhy", className: "hint" }, ""));
+    box.appendChild(v);
+    view.appendChild(box);
+  }
+  const tb = el("table", { id: "liveTable" });
+  tb.appendChild(rowOf(["field", "value", "", "p", "margin", ""], "th"));
+  for (const n of names) {
+    const tr = el("tr", { id: "lv-" + n });
+    tr.appendChild(el("td", {}, n));
+    const v = el("td"); v.appendChild(el("span", { className: "val" }, "")); tr.appendChild(v);
+    const t = el("td"), track = el("div", { className: "track" }), fill = el("div", { className: "fill" });
+    fill.style.width = "0%"; track.appendChild(fill); t.appendChild(track); tr.appendChild(t);
+    tr.appendChild(el("td", {}, "")); tr.appendChild(el("td", {}, "")); tr.appendChild(el("td", {}, ""));
+    tb.appendChild(tr);
+  }
+  const w = el("div", { className: "table-wrap" }); w.appendChild(tb);
+  view.appendChild(w);
+  out.appendChild(view);
+}
+function renderLive(runData, wall) {
+  const vals = fieldValues(runData), names = Object.keys(vals);
+  const key = names.join(",") + "|" + runData.preset;
+  if (key !== liveKey || !document.getElementById("liveView")) { buildLiveView(names, runData); liveKey = key; }
+  for (const n of names) {
+    const f = vals[n], tr = document.getElementById("lv-" + n);
+    if (!tr) continue;
+    const cells = tr.children, span = cells[1].firstChild, text = JSON.stringify(f.value);
+    if (span.textContent !== text) {
+      if (span.textContent) { span.classList.add("flash"); setTimeout(() => span.classList.remove("flash"), 60); }
+      span.textContent = text;
+    }
+    cells[2].firstChild.firstChild.style.width = f.p === undefined ? "0%" : (100 * f.p).toFixed(1) + "%";
+    cells[3].textContent = f.p === undefined ? "-" : f.p.toFixed(3);
+    cells[4].textContent = f.margin === undefined ? "" : f.margin.toFixed(3);
+    cells[5].textContent = f.abstain === undefined ? "" : f.abstain ? "abstain" : "accept";
+    cells[5].className = f.abstain ? "diff" : "same";
+  }
+  const gate = GATES[runData.preset];
+  if (gate && document.getElementById("liveVerdict")) {
+    const failed = [], unsure = [];
+    for (const [k, ok] of Object.entries(gate.rules)) {
+      const f = vals[k];
+      if (!f) continue;
+      if (f.abstain) unsure.push(k);
+      else if (!ok.some((x) => JSON.stringify(x) === JSON.stringify(f.value))) failed.push(k + " = " + JSON.stringify(f.value));
+    }
+    const verdict = failed.length ? "no" : unsure.length ? "unsure" : "yes";
+    const vd = document.getElementById("liveVerdict");
+    vd.textContent = verdict;
+    vd.className = "big " + (verdict === "yes" ? "same" : "diff");
+    document.getElementById("liveVerdictWhy").textContent = failed.length ? "fails: " + failed.join(", ") : unsure.length ? "uncertain: " + unsure.join(", ") : "all checks pass";
+  }
+  const t = runData.response ? runData.response.timings : null;
+  document.getElementById("liveStamp").textContent = "updated " + new Date().toLocaleTimeString() + ", " + (wall / 1000).toFixed(2) + " s" +
+    (t ? " (server " + ms(t.total_ms) + ")" : "") + (runData.images && runData.images[0] ? ", frame " + runData.images[0] : "");
 }
 function logLine(text, cls) {
   const log = $("liveLog");
