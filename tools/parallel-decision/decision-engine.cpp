@@ -323,6 +323,12 @@ void engine::clear_pool() {
 // With sharing, up to a third of the sequences keep their decoded path for the next call (the next
 // round of greedy or pruned tree fields): a branch that continues a kept path copies its cells up to
 // the common tokens and decodes only the rest. Kept paths of the call before are freed at the end.
+//
+// Recurrent layers take a ubatch only when every sequence in it holds the same number of tokens
+// (split_equal), so on recurrent/hybrid models (no sharing there) uneven branches would split one
+// decode into several passes. There the branches go longest first and each is right-padded to the
+// longest branch of its group; every layer is causal, so the logits read at a branch's last real
+// token don't see the padding, and the padded cells go with the branch (upstream ad129b08d).
 std::vector<std::vector<float>> engine::score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free, bool share) {
     struct node {
         llama_token      tok;
@@ -351,9 +357,20 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
     const int keep_max = share ? n_free / 3 : 0;
 
     std::vector<std::vector<float>> result(branches.size());
+    const bool pad = !per_cell;
+    std::vector<size_t> order(branches.size());
+    for (size_t b = 0; b < order.size(); ++b) {
+        order[b] = b;
+    }
+    if (pad) {
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return branches[a].toks.size() > branches[b].toks.size();
+        });
+    }
     const int max_rows = (int) llama_n_batch(ctx);
     size_t start = 0;
     while (start < branches.size()) {
+        const size_t width = branches[order[start]].toks.size(); // padded length of this group
         std::vector<node> nodes;
         std::vector<base_t> bases;
         std::vector<std::pair<int, int>> roots; // (base, first node of a path)
@@ -362,7 +379,7 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
         int n_out = 0, n_leaves = 0;
         size_t end = start;
         for (; end < branches.size(); ++end) {
-            const branch & b = branches[end];
+            const branch & b = branches[order[end]];
             // continue the longest kept path of the same trunk; at least one token is decoded for the logits
             const kept_path * from = nullptr;
             size_t skip = 0;
@@ -413,9 +430,11 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
             // every output row counts (the context sizes its outputs by the decision sequences); a new
             // path needs a sequence unless it extends a leaf
             const int new_rows = (int) (b.toks.size() - i);
+            const int pad_rows = pad ? (int) (width - b.toks.size()) : 0;
             const int new_out  = new_rows > 0 || !nodes[cur].out ? 1 : 0;
             const int new_leaf = new_rows > 0 && (cur < 0 || !nodes[cur].kids.empty()) ? 1 : 0;
-            if (n_out + new_out > n_free || n_leaves + new_leaf > n_ids || (int) nodes.size() + new_rows > max_rows) {
+            if (n_out + new_out > n_free || n_leaves + new_leaf > n_ids ||
+                (int) nodes.size() + new_rows + pad_rows > max_rows) {
                 break;
             }
             if (bi < 0) {
@@ -433,9 +452,15 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
                 cur = n;
             }
             nodes[cur].out = true;
+            end_node.push_back(cur);
+            // padding repeats the last token after the output row; the leaf moves to its end
+            for (size_t k = b.toks.size(); pad && k < width; ++k) {
+                nodes.push_back({ b.toks.back(), b.pos0 + (llama_pos) k, bi, cur, {} });
+                nodes[cur].kids.push_back((int) nodes.size() - 1);
+                cur = (int) nodes.size() - 1;
+            }
             n_out    += new_out;
             n_leaves += new_leaf;
-            end_node.push_back(cur);
         }
         if (end == start) {
             throw std::runtime_error("a decision suffix exceeds the batch size");
@@ -483,10 +508,10 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
             throw std::runtime_error(rc == 1 ? "no free KV cache space for the decision branches"
                                              : "llama_decode failed on the decision branches (" + std::to_string(rc) + ")");
         }
-        for (size_t b = start; b < end; ++b) {
-            const float * logits = llama_get_logits_ith(ctx, end_node[b - start]);
-            for (llama_token t : branches[b].cands) {
-                result[b].push_back(logits[t]);
+        for (size_t k = start; k < end; ++k) {
+            const float * logits = llama_get_logits_ith(ctx, end_node[k - start]);
+            for (llama_token t : branches[order[k]].cands) {
+                result[order[k]].push_back(logits[t]);
             }
         }
         for (const auto & [n, seq] : leaves) {
