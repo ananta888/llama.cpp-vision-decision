@@ -1,6 +1,7 @@
 import base64
 import json
 import math
+import time
 
 import pytest
 import requests
@@ -24,10 +25,17 @@ SCHEMA = {
 
 def image_b64(i: int) -> str:
     url = IMG_URLS[i]
-    if url not in _images:
-        res = requests.get(url)
-        res.raise_for_status()
-        _images[url] = base64.b64encode(res.content).decode("utf-8")
+    for attempt in range(4):
+        if url in _images:
+            break
+        try:
+            res = requests.get(url, timeout=30)
+            res.raise_for_status()
+            _images[url] = base64.b64encode(res.content).decode("utf-8")
+        except requests.RequestException:
+            if attempt == 3:
+                raise
+            time.sleep(2)  # a flaky network (DNS) should not fail the test
     return _images[url]
 
 
