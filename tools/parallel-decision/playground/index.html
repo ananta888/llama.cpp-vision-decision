@@ -76,6 +76,13 @@
   .cols h3 { font-size: 13px; margin: 0 0 4px; }
   .big { font-size: 20px; font-weight: 600; }
   .tok { font-family: ui-monospace, monospace; white-space: pre; }
+  .side { display: grid; grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: start; margin-top: 8px; }
+  .side > .lab { color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 8px; }
+  .side > .cell { background: var(--soft); border-radius: 6px; padding: 8px; min-width: 0; font-size: 12px; }
+  .side > .cell pre { margin: 0; padding: 0; background: none; max-height: 300px; }
+  .side > .head { font-weight: 600; font-size: 13px; }
+  @media (max-width: 700px) { .side { grid-template-columns: minmax(0, 1fr); } .side > .lab { padding-top: 12px; } }
+  .check { font-size: 12px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -297,15 +304,41 @@ function allowedOf(f) {
   if (f.type === "number") return f.minimum + " to " + f.maximum + " in steps of " + f.step;
   return "true, false";
 }
-function chatRequest(body) {
-  // same images, fields, descriptions and allowed values as the decision
-  const parts = Array.isArray(body.contexts[0]) ? body.contexts[0].filter((p) => p.type === "image_url") : [];
-  const fields = Object.entries(body.schema).map(([n, f]) => "- " + n + ": " + (f.description || "") + " Allowed values: " + allowedOf(f)).join("\n");
-  const text = (($("text").value || "") + "\nAnswer as JSON with these fields:\n" + fields).trim();
-  return { messages: [{ role: "user", content: parts.concat([{ type: "text", text }]) }], temperature: 0,
+function systemTextOf(schema, instructions) {
+  // the field catalogue the decision puts in the system message (compile_schema)
+  const lines = [];
+  for (const [n, f] of Object.entries(schema)) {
+    let vals;
+    if (f.choices || f.enum) vals = (f.choices || f.enum).map((v) => JSON.stringify(v));
+    else if (f.type === "boolean") vals = ["true", "false"];
+    else if (f.type === "integer") { vals = []; for (let v = f.minimum; v <= f.maximum; v++) vals.push(String(v)); }
+    else {
+      const dec = (x) => { const t = String(x); return t.includes(".") ? t.split(".")[1].length : 0; };
+      const places = Math.max(dec(f.minimum), dec(f.maximum), dec(f.step));
+      vals = [];
+      for (let i = 0; f.minimum + i * f.step <= f.maximum + 1e-9; i++) vals.push((f.minimum + i * f.step).toFixed(places));
+    }
+    lines.push(JSON.stringify(n) + (f.description ? ": " + f.description : "") + "\nAllowed values: " + vals.join(", "));
+  }
+  return "Select the requested field value from its allowed values, based on the context. Respond with the JSON value only.\n\nFields:\n" +
+         lines.join("\n") + "\n" + (instructions || "");
+}
+function chatRequest(body, system) {
+  // the same system and user message as the decision; only the way the answer is made differs
+  return { messages: [{ role: "system", content: system }, { role: "user", content: body.contexts[0] }], temperature: 0,
            max_tokens: 64 + 32 * Object.keys(body.schema).length, logprobs: true, top_logprobs: 5,
            response_format: { type: "json_schema", json_schema: { schema: jsonSchemaOf(body.schema) } },
            chat_template_kwargs: { enable_thinking: false }, cache_prompt: body.cache_prompt };
+}
+function userTextOf(context) {
+  // user message as the template sees it: images as markers, parts joined like chat parts
+  if (!Array.isArray(context)) return context;
+  let text = "", lastMedia = false;
+  for (const p of context) {
+    if (p.type === "image_url") { text += "<image>"; lastMedia = true; }
+    else { if (!lastMedia && text) text += "\n"; text += p.text; lastMedia = false; }
+  }
+  return text;
 }
 async function post(path, body) {
   const t0 = performance.now();
@@ -344,9 +377,17 @@ async function run() {
     }
     if (mode !== "decision") {
       step = mode === "compare" ? "decision done, chat..." : "chat...";
-      const creq = chatRequest(body);
+      const fromTrace = runData.response && runData.response.trace && runData.response.trace.instructions;
+      const system = fromTrace || systemTextOf(body.schema, body.instructions);
+      const creq = chatRequest(body, system);
       const c = await post("/v1/chat/completions", creq);
-      runData.chat = { request: redacted({ contexts: [creq.messages[0].content], rest: Object.assign({}, creq, { messages: undefined }) }), response: c.js, round_trip_ms: c.ms };
+      runData.chat = { request: redacted({ contexts: [creq.messages[1].content], rest: Object.assign({}, creq, { messages: undefined }), system }),
+                       response: c.js, round_trip_ms: c.ms, system_from: fromTrace ? "decision trace" : "rebuilt in the page" };
+      try {
+        const tpl = await post("/apply-template", { messages: [{ role: "system", content: system }, { role: "user", content: userTextOf(body.contexts[0]) }],
+                                                     chat_template_kwargs: { enable_thinking: false } });
+        runData.chat.prompt = tpl.js.prompt;
+      } catch (e) { runData.chat.prompt = null; }
     }
     last = runData;
     render(runData);
@@ -536,6 +577,85 @@ function renderCompare(runData, out) {
   }
   w.appendChild(tb); out.appendChild(w);
   out.appendChild(el("p", { className: "hint" }, same + " of " + Object.keys(d.fields).length + " fields agree; decision took " + (ct / Math.max(dt, 1)).toFixed(1) + "x less server time than chat."));
+  renderSideBySide(runData, out);
+}
+function promptPre(text, tail) {
+  const pre = el("pre");
+  text.split("<image>").forEach((part, i, all) => {
+    pre.appendChild(document.createTextNode(part));
+    if (i < all.length - 1) pre.appendChild(el("span", { className: "img" }, "[image " + (i + 1) + "]"));
+  });
+  if (tail) pre.appendChild(el("span", { className: "img" }, tail));
+  return pre;
+}
+function renderSideBySide(runData, out) {
+  const res = runData.response, r = res.results[0], tr = res.trace, ct = r.trace;
+  const chat = runData.chat, cres = chat.response, t = cres.timings || {};
+  out.appendChild(el("h2", { style: "margin-top: 16px" }, "Side by side: what goes in, what comes out"));
+  if (!tr || !ct) { out.appendChild(el("p", { className: "hint" }, "Enable trace for the side-by-side view.")); return; }
+  const grid = el("div", { className: "side" });
+  const row = (label, left, right) => {
+    grid.appendChild(el("div", { className: "lab" }, label));
+    for (const x of [left, right]) {
+      const c = el("div", { className: "cell" });
+      if (typeof x === "string") c.textContent = x; else c.appendChild(x);
+      grid.appendChild(c);
+    }
+  };
+  grid.appendChild(el("div"));
+  grid.appendChild(el("div", { className: "head" }, "Decision (new)"));
+  grid.appendChild(el("div", { className: "head" }, "Chat with json_schema (old)"));
+
+  // in: the rendered prompts
+  const decisionPrompt = tr.prompt_prefix + ct.prompt;
+  const fieldLines = tr.fields.map((f) => "\n  " + JSON.stringify(f.name) + ": <" + (f.values || f.candidates).join(" | ") + ">").join("");
+  row("In: prompt", promptPre(decisionPrompt, fieldLines + "\n  (each line scored on its own branch)"),
+      chat.prompt ? promptPre(chat.prompt, "<- the model writes from here") : "the template could not be rendered");
+
+  // constraint
+  const cons = el("div");
+  for (const f of tr.fields) cons.appendChild(el("div", {}, f.name + ": one of " + (f.values || f.candidates).length + " values"));
+  cons.appendChild(el("div", { className: "hint" }, "nothing else can come out; the JSON is built from the scores"));
+  const gram = el("div");
+  gram.appendChild(el("pre", {}, JSON.stringify(jsonSchemaOf(JSON.parse(runData.request ? JSON.stringify(runData.request.schema) : "{}")), null, 1)));
+  gram.appendChild(el("div", { className: "hint" }, "a grammar from this schema limits every generated token"));
+  row("Constraint", cons, gram);
+
+  // work
+  const imgs = ct.chunks.filter((c) => c.type === "image");
+  row("Work",
+      "prefill " + tr.prefix_tokens + " prefix tokens" + (tr.prefix_cached ? " (cached)" : "") + " + " + r.usage.context_tokens + " context tokens" +
+      (imgs.length ? " (" + imgs.map((c) => c.tokens + " image tokens on " + c.positions + " positions" + (c.cached ? ", cached" : "")).join("; ") + ")" : "") +
+      "; then " + tr.fields.length + " fields scored from position " + ct.position_fields + " in " + res.timings.rounds + " round(s), " + res.usage.scored_rows + " rows",
+      "prompt " + (t.prompt_n || 0) + " tokens" + (t.cache_n ? " (+" + t.cache_n + " cached)" : "") + "; then " + (t.predicted_n || 0) + " tokens generated one after another");
+
+  // out
+  const dout = el("div");
+  for (const [n, f] of Object.entries(r.fields)) dout.appendChild(el("div", {}, n + " = " + JSON.stringify(f.value) + "   p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) : "")));
+  const cout = el("div");
+  cout.appendChild(el("pre", {}, cres.choices[0].message.content));
+  const lp = cres.choices[0].logprobs && cres.choices[0].logprobs.content;
+  if (lp) {
+    const low = lp.map((x) => [x.token, Math.exp(x.logprob)]).filter((x) => x[1] < 0.99);
+    cout.appendChild(el("div", { className: "hint" }, lp.length + " tokens; " + (low.length ? "below 0.99: " + low.map((x) => JSON.stringify(x[0]) + " " + x[1].toFixed(3)).join(", ") : "all at p >= 0.99")));
+  }
+  row("Out", dout, cout);
+
+  // time
+  const enc = res.timings.media_encode_ms || 0;
+  row("Time",
+      "image encode " + ms(enc) + ", prefill " + ms(Math.max(res.timings.prefill_ms - enc, 0)) + ", scoring " + ms(res.timings.scoring_ms) + " = " + ms(res.timings.total_ms),
+      "prompt incl. image " + ms(t.prompt_ms || 0) + ", generation " + ms(t.predicted_ms || 0) + " = " + ms((t.prompt_ms || 0) + (t.predicted_ms || 0)));
+  out.appendChild(grid);
+
+  // are the prompts really the same up to the answer?
+  if (chat.prompt) {
+    const dNoAnswer = decisionPrompt.endsWith("{\n") ? decisionPrompt.slice(0, -2) : decisionPrompt;
+    const same = dNoAnswer === chat.prompt;
+    out.appendChild(el("p", { className: "check " + (same ? "same" : "diff") },
+      same ? "Both prompts are identical up to the answer (system message from the " + chat.system_from + ")."
+           : "The prompts differ before the answer; compare them above."));
+  }
 }
 function render(runData) {
   const out = $("out");

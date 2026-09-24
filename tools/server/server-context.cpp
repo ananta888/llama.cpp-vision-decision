@@ -2726,7 +2726,7 @@ private:
                 results[i]["trace"] = { { "prompt", prompt }, { "chunks", chunks }, { "position_start", (long long) b.shared_tokens },
                                         { "position_fields", r.pos_fields }, { "group", r.group } };
             }
-            trace = { { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
+            trace = { { "instructions", cs.system_text }, { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
                       { "mode", opt.mode }, { "groups", n_groups }, { "fields", fields } };
         }
         json out = json::object();
