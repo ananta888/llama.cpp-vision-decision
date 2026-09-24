@@ -327,7 +327,8 @@ straight to your llama-server, runs a decision and the same question as a chat c
 timers, and has a small game whose agents decide through the endpoint.
 
 `llama-server` serves a web page for image decisions at `/decision-playground` (source: `playground/index.html`,
-built into the server). Drop, paste or pick images, choose or edit a schema, and get the decision with every value's
+built into the server). Drop, paste or pick images (scaled down in the browser, 1024 px by default: a 12 MP photo
+would cost thousands of image tokens and minutes on a CPU), choose or edit a schema, and get the decision with every value's
 probability, margin and abstain marks, a time bar (image encode, prefill, field scoring), and the trace: what happened
 step by step, the prompt as the model sees it, the chunks and positions, the fields as scored, and the raw request and
 response. A trace downloads as JSON; the last runs stay in the browser's history. The page is public like the web UI;

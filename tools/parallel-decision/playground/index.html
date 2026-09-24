@@ -95,13 +95,19 @@
     <div><label for="minp">Abstain below p</label><input id="minp" type="number" value="0" min="0" max="1" step="0.05"></div>
     <div><label for="minm">Abstain below margin</label><input id="minm" type="number" value="0" min="0" max="1" step="0.05"></div>
   </div>
+  <div class="row">
+    <div><label for="maxside">Max image size</label><select id="maxside">
+      <option value="512">512 px</option><option value="768">768 px</option><option value="1024" selected>1024 px</option>
+      <option value="1536">1536 px</option><option value="0">original</option></select></div>
+  </div>
+  <div class="hint">Images are scaled down in the browser before sending. Big photos cost many image tokens and take minutes on a CPU.</div>
   <div class="actions">
     <button id="run">Decide</button>
     <label class="hint" style="margin: 0"><input id="trace" type="checkbox" checked> trace</label>
     <label class="hint" style="margin: 0"><input id="cache" type="checkbox" checked> use cache</label>
     <span class="hint">Ctrl+Enter</span>
   </div>
-  <h2 style="margin-top: 18px">History</h2>
+  <div class="actions" style="margin-top: 18px"><h2 style="margin: 0 auto 0 0">History</h2><button class="ghost" id="clearHistory">clear history</button></div>
   <div id="history"><span class="hint">Runs of this browser show up here.</span></div>
 </section>
 <section id="out">
@@ -134,6 +140,7 @@ const PRESETS = {
 };
 let images = [];
 let last = null;
+let lastSizes = [];
 
 function el(tag, attrs, text) {
   const n = document.createElement(tag);
@@ -218,10 +225,30 @@ document.addEventListener("paste", (e) => addFiles([...e.clipboardData.items].fi
 document.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); });
 
 // ---- request
-function buildRequest() {
+function scaled(url, maxSide) {
+  // scale the longer side down to maxSide; small images are sent as they are
+  return new Promise((ok) => {
+    if (!maxSide) return ok({ url, note: "original" });
+    const img = new Image();
+    img.onload = () => {
+      const s = maxSide / Math.max(img.width, img.height);
+      if (s >= 1) return ok({ url, note: img.width + "x" + img.height });
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      ok({ url: c.toDataURL("image/jpeg", 0.92), note: img.width + "x" + img.height + " -> " + c.width + "x" + c.height });
+    };
+    img.onerror = () => ok({ url, note: "not decodable in the browser, sent as is" });
+    img.src = url;
+  });
+}
+async function buildRequest() {
   const schema = checkSchema();
   if (!schema) return null;
-  const parts = images.map((im) => ({ type: "image_url", image_url: { url: im.url } }));
+  const maxSide = parseInt($("maxside").value, 10);
+  const sent = await Promise.all(images.map((im) => scaled(im.url, maxSide)));
+  lastSizes = sent.map((x) => x.note);
+  const parts = sent.map((x) => ({ type: "image_url", image_url: { url: x.url } }));
   if ($("text").value) parts.push({ type: "text", text: $("text").value });
   const body = { schema, contexts: [parts.length ? parts : ($("text").value || " ")], mode: $("mode").value,
                  temperature: parseFloat($("temp").value) || 1, return_probs: true, trace: $("trace").checked, cache_prompt: $("cache").checked };
@@ -240,20 +267,27 @@ function redacted(body) {
 }
 
 async function run() {
-  const body = buildRequest();
+  if ($("run").disabled) return;
+  const body = await buildRequest();
   if (!body) return;
   store("dp.preset", $("preset").value); store("dp.schema", $("schema").value);
   $("run").disabled = true;
   const out = $("out");
   out.innerHTML = "";
   out.appendChild(el("h2", {}, "Result"));
-  out.appendChild(el("p", { className: "hint" }, "deciding..."));
+  const wait = el("p", { className: "hint" }, "deciding...");
+  out.appendChild(wait);
+  if (lastSizes.length) out.appendChild(el("p", { className: "hint" }, "images: " + lastSizes.join(", ")));
   const t0 = performance.now();
+  const tick = setInterval(() => {
+    const s = (performance.now() - t0) / 1000;
+    wait.textContent = "deciding... " + s.toFixed(0) + " s" + (s > 20 ? " (the server is still working; large images take long on a CPU)" : "");
+  }, 1000);
   try {
     const r = await fetch(base() + "/v1/decision", { method: "POST", headers: headers(), body: JSON.stringify(body) });
     const js = await r.json();
     if (!r.ok) throw new Error((js.error && js.error.message) || r.statusText);
-    last = { request: redacted(body), response: js, round_trip_ms: performance.now() - t0, at: new Date().toISOString() };
+    last = { request: redacted(body), response: js, round_trip_ms: performance.now() - t0, at: new Date().toISOString(), images: lastSizes };
     render(last);
     remember(last);
   } catch (e) {
@@ -261,10 +295,16 @@ async function run() {
     out.appendChild(el("h2", {}, "Result"));
     out.appendChild(el("p", { className: "err" }, String(e.message || e)));
   } finally {
+    clearInterval(tick);
     $("run").disabled = false;
   }
 }
 $("run").onclick = run;
+$("clearHistory").onclick = () => {
+  try { localStorage.removeItem("dp.history"); } catch (e) { /* storage off */ }
+  $("history").innerHTML = "";
+  $("history").appendChild(el("span", { className: "hint" }, "History cleared."));
+};
 
 // ---- rendering
 function render(runData) {
@@ -343,7 +383,7 @@ function render(runData) {
     const ol = el("ol");
     const imgs = ct.chunks.filter((c) => c.type === "image");
     const lines = [
-      "Instructions and field list: " + tr.prefix_tokens + " tokens, " + (tr.prefix_cached ? "reused from the cache" : "decoded") + ".",
+      (runData.images && runData.images.length ? "Images sent: " + runData.images.join(", ") + ". " : "") + "Instructions and field list: " + tr.prefix_tokens + " tokens, " + (tr.prefix_cached ? "reused from the cache" : "decoded") + ".",
       imgs.length ? imgs.length + " image" + (imgs.length > 1 ? "s" : "") + " encoded by the vision projector: " + imgs.map((c) => c.tokens + " tokens on " + c.positions + " positions" + (c.cached ? " (cached embedding)" : "")).join(", ") + "." : "No image in this context.",
       "Context decoded into its own KV sequence from position " + ct.position_start + ": " + ct.chunks.map((c) => c.type + " " + c.tokens).join(" + ") + " tokens.",
       "All " + tr.fields.length + " fields branch off that sequence at position " + ct.position_fields + " and are scored together (" + res.timings.rounds + " round" + (res.timings.rounds > 1 ? "s" : "") + ", " + res.usage.scored_rows + " rows, mode " + tr.mode + ").",

@@ -2687,6 +2687,9 @@ private:
             item["usage"] = { { "context_tokens", (long long) r.context_tokens }, { "scored_rows", r.rows } };
             results.push_back(item);
         }
+        SRV_INF("decision: %zu contexts, %zu fields, %zu media chunks (%zu tokens, %d cached), prefix %zu tokens%s, media encode %.0f ms, prefill %.0f ms, scoring %.0f ms\n",
+                b.items.size(), cs.specs.size(), enc.media.size(), n_media_tokens, enc.n_cached, b.shared_tokens,
+                b.cache_hit ? " (cached)" : "", enc.encode_ms, b.prefill_ms, b.scoring_ms);
         json trace;
         if (body.value("trace", false)) {
             // what the request turned into: prompt, chunks, positions and the scored fields
