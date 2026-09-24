@@ -30,6 +30,7 @@
 #include <list>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 
 // fix problem with std::min and std::max
 #if defined(_WIN32)
@@ -914,6 +915,7 @@ struct decision_media_encoder {
     mtmd::batch_ptr batch;
     double encode_ms = 0;
     int    n_cached  = 0;
+    std::unordered_set<const mtmd_input_chunk *> hits; // chunks taken from the cache
 
     float * cached(const mtmd_input_chunk * chunk) {
         const std::string & key = keys[chunk];
@@ -923,6 +925,7 @@ struct decision_media_encoder {
     float * get(const mtmd_input_chunk * chunk) {
         if (float * embd = cached(chunk)) {
             n_cached++;
+            hits.insert(chunk);
             return embd;
         }
         if (batch) {
@@ -2596,6 +2599,7 @@ private:
         enc.cache  = decision_media.max_bytes > 0 ? &decision_media : nullptr;
         enc.n_embd = llama_model_n_embd_inp(model_tgt);
         std::vector<mtmd::input_chunks_ptr> media_chunks;
+        std::vector<const mtmd_input_chunks *> context_chunks(dynamic.size(), nullptr); // for the trace
         std::vector<llama_decision::context_input> inputs(dynamic.size());
         size_t n_media_tokens = 0;
         for (size_t i = 0; i < dynamic.size(); ++i) {
@@ -2644,6 +2648,7 @@ private:
             }
             inputs[i].n_tokens = mtmd_helper_get_n_tokens(chunks.get());
             const mtmd_input_chunks * c = chunks.get();
+            context_chunks[i] = c;
             inputs[i].prefill = [this, &enc, c](llama_seq_id seq, llama_pos pos0) {
                 return decision_prefill_chunks(mctx, ctx_tgt, enc, c, seq, pos0);
             };
@@ -2682,6 +2687,45 @@ private:
             item["usage"] = { { "context_tokens", (long long) r.context_tokens }, { "scored_rows", r.rows } };
             results.push_back(item);
         }
+        json trace;
+        if (body.value("trace", false)) {
+            // what the request turned into: prompt, chunks, positions and the scored fields
+            const std::string marker = get_media_marker();
+            json fields = json::array();
+            for (size_t f = 0; f < cs.specs.size(); ++f) {
+                fields.push_back({ { "name", cs.specs[f].name }, { "suffix", cs.inputs[f].suffix }, { "candidates", cs.inputs[f].candidates },
+                                   { "values", cs.specs[f].encoded },
+                                   { "temperature", cs.specs[f].temperature }, { "min_probability", cs.specs[f].min_probability },
+                                   { "min_margin", cs.specs[f].min_margin } });
+            }
+            int n_groups = 0;
+            for (size_t i = 0; i < b.items.size(); ++i) {
+                const auto & r = b.items[i];
+                n_groups = std::max(n_groups, r.group + 1);
+                std::string prompt = dynamic[i];
+                string_replace_all(prompt, marker, "<image>");
+                json chunks = json::array();
+                if (context_chunks[i]) {
+                    for (size_t k = 0; k < mtmd_input_chunks_size(context_chunks[i]); ++k) {
+                        const mtmd_input_chunk * chunk = mtmd_input_chunks_get(context_chunks[i], k);
+                        const long long n_tok = (long long) mtmd_input_chunk_get_n_tokens(chunk);
+                        if (mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+                            chunks.push_back({ { "type", "text" }, { "tokens", n_tok } });
+                        } else {
+                            const char * id = mtmd_input_chunk_get_id(chunk);
+                            chunks.push_back({ { "type", "image" }, { "tokens", n_tok }, { "positions", mtmd_input_chunk_get_n_pos(chunk) },
+                                               { "id", id ? std::string(id).substr(0, 16) : std::string() }, { "cached", enc.hits.count(chunk) > 0 } });
+                        }
+                    }
+                } else {
+                    chunks.push_back({ { "type", "text" }, { "tokens", (long long) r.context_tokens } });
+                }
+                results[i]["trace"] = { { "prompt", prompt }, { "chunks", chunks }, { "position_start", (long long) b.shared_tokens },
+                                        { "position_fields", r.pos_fields }, { "group", r.group } };
+            }
+            trace = { { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
+                      { "mode", opt.mode }, { "groups", n_groups }, { "fields", fields } };
+        }
         json out = json::object();
         out["object"]  = "decision";
         out["results"] = results;
@@ -2689,6 +2733,9 @@ private:
         out["created"] = (long long) std::time(nullptr);
         out["usage"]   = usage;
         out["timings"] = timings;
+        if (!trace.is_null()) {
+            out["trace"] = trace;
+        }
         return out;
     }
 

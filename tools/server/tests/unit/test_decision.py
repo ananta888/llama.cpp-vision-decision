@@ -262,3 +262,26 @@ def test_decision_playground_page():
     assert res.status_code == 401
     res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": ["x"]}, headers={"Authorization": "Bearer secret"})
     assert res.status_code == 200
+
+
+def test_decision_trace():
+    global server
+    server.start()
+    data = {"schema": SCHEMA, "contexts": [image_context([0]), "A red truck on a road."]}
+    plain = decide(data)
+    assert "trace" not in plain and all("trace" not in r for r in plain["results"])
+    body = decide(dict(data, trace=True))
+    assert body["results"][0]["decision"] == plain["results"][0]["decision"]
+    tr = body["trace"]
+    assert tr["prefix_tokens"] == body["usage"]["prompt_tokens"] - body["usage"]["context_tokens"]
+    assert [f["name"] for f in tr["fields"]] == list(SCHEMA)
+    for r in body["results"]:
+        t = r["trace"]
+        positions = sum(c.get("positions", c["tokens"]) for c in t["chunks"])
+        assert t["position_start"] == tr["prefix_tokens"]
+        assert t["position_fields"] == t["position_start"] + positions
+        assert sum(c["tokens"] for c in t["chunks"]) == r["usage"]["context_tokens"]
+    image = body["results"][0]["trace"]
+    assert [c["type"] for c in image["chunks"]].count("image") == 1
+    assert image["prompt"].count("<image>") == 1
+    assert "<__media" not in json.dumps(body)

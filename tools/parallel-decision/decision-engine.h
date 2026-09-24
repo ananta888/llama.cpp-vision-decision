@@ -60,6 +60,8 @@ struct result {
     bool   cache_hit      = false;
     size_t shared_tokens  = 0;
     size_t context_tokens = 0;
+    llama_pos pos_fields  = 0; // position the field branches start at
+    int    group          = 0; // index of the group of contexts decoded together
     int    rows           = 0;
     int    rounds         = 0;
     double prefill_ms     = 0;

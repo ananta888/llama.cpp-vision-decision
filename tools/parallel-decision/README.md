@@ -125,6 +125,7 @@ Every field also takes `temperature` and `abstain` (`x-temperature` / `x-abstain
 | `temperature` | 1.0 | default temperature of every field |
 | `abstain` | none | default `{"min_probability": p, "min_margin": m}` of every field |
 | `return_probs` | false | list every allowed value of a tree field with its probability |
+| `trace` | false | add a `trace`: the rendered prompt, the fields as scored, and per context its text and image chunks (tokens, positions, cache hits), the position the fields start at and its group |
 
 Tree fields also return `margin` (top-1 minus top-2 probability) and `entropy` (nats) of their value distribution.
 
@@ -325,8 +326,9 @@ line). Environment: `DECIDE_TREE`, `DECIDE_TREE_MAX`, `DECIDE_NSEQ`, `DECIDE_SPL
 straight to your llama-server, runs a decision and the same question as a chat completion side by side with live
 timers, and has a small game whose agents decide through the endpoint.
 
-`llama-server` serves a playground for image decisions at `/decision-playground` (source:
-`playground/index.html`, built into the server): pick images, edit the schema, and see every value's probability,
-margin, abstain marks and the timings. The page itself is public like the web UI; with `--api-key`, enter the key in
-the page, since `/v1/decision` still checks it. The file also works on its own, opened in a browser and pointed at a
-server (CORS is open by default).
+`llama-server` serves a web page for image decisions at `/decision-playground` (source: `playground/index.html`,
+built into the server). Drop, paste or pick images, choose or edit a schema, and get the decision with every value's
+probability, margin and abstain marks, a time bar (image encode, prefill, field scoring), and the trace: what happened
+step by step, the prompt as the model sees it, the chunks and positions, the fields as scored, and the raw request and
+response. A trace downloads as JSON; the last runs stay in the browser's history. The page is public like the web UI;
+with `--api-key`, enter the key in the page (it is not stored), since `/v1/decision` still checks it.

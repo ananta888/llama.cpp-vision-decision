@@ -3,85 +3,137 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vision Decision Playground</title>
+<title>Vision Decisions</title>
 <style>
-  :root { --bg: #f7f7f5; --fg: #1d1d1f; --muted: #6b6b70; --card: #fff; --line: #deded9; --accent: #2f6fdb; --warn: #c2410c; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #141416; --fg: #ececef; --muted: #9a9aa2; --card: #1d1d21; --line: #33333a; --accent: #6ea0ff; --warn: #fb923c; } }
+  :root {
+    --bg: #f6f6f3; --fg: #1c1c1e; --muted: #6a6a70; --card: #ffffff; --line: #deded8; --soft: #efefea;
+    --accent: #2f6fdb; --accent-fg: #ffffff; --warn: #b4460a; --ok: #1f7a3d;
+    --seg1: #7c5cd6; --seg2: #2f6fdb; --seg3: #1f9e8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #131316; --fg: #ececef; --muted: #9a9aa3; --card: #1c1c20; --line: #313138; --soft: #25252b;
+            --accent: #6ea0ff; --accent-fg: #0e1320; --warn: #fb923c; --ok: #4ade80;
+            --seg1: #a78bfa; --seg2: #6ea0ff; --seg3: #34d399; }
+  }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  @media (max-width: 800px) { main { grid-template-columns: minmax(0, 1fr); } }
-  h1 { font-size: 18px; max-width: 1100px; margin: 0 auto; padding: 16px 16px 0; }
+  header, main { max-width: 1240px; margin: 0 auto; padding: 0 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding-top: 16px; }
+  header h1 { font-size: 18px; margin: 0 auto 4px 0; }
+  header .model { color: var(--muted); font-size: 12px; }
+  main { display: grid; gap: 16px; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); padding-top: 12px; padding-bottom: 32px; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
-  label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px; }
-  input[type=text], input[type=number], select, textarea { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
-  textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 180px; }
-  .row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  button { margin-top: 12px; background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 16px; font: inherit; cursor: pointer; }
-  button:disabled { opacity: .5; }
-  #thumbs img { max-width: 120px; max-height: 120px; margin: 6px 6px 0 0; border-radius: 4px; border: 1px solid var(--line); }
-  .field { margin: 10px 0; }
-  .field h3 { font-size: 14px; margin: 0 0 4px; display: flex; justify-content: space-between; gap: 8px; }
-  .abstain { color: var(--warn); font-size: 12px; }
-  .bar { display: grid; grid-template-columns: 110px minmax(0, 1fr) 56px; gap: 6px; align-items: center; font-size: 12px; }
-  .bar div.track { background: var(--bg); border-radius: 3px; height: 10px; overflow: hidden; }
-  .bar div.fill { background: var(--accent); height: 100%; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 4px 0 8px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  input[type=text], input[type=number], input[type=password], select, textarea {
+    width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 170px; resize: vertical; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+  button { background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; padding: 8px 16px; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 4px 10px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #drop { border: 2px dashed var(--line); border-radius: 8px; padding: 14px; text-align: center; color: var(--muted); cursor: pointer; }
+  #drop.over { border-color: var(--accent); color: var(--accent); }
+  #thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .thumb { position: relative; }
+  .thumb img { width: 96px; height: 96px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
+  .thumb button { position: absolute; top: 2px; right: 2px; padding: 0 6px; font-size: 12px; line-height: 18px; }
+  .decision { font-family: ui-monospace, monospace; font-size: 13px; background: var(--soft); border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-word; }
+  .field { margin: 12px 0; }
+  .field h3 { font-size: 14px; margin: 0 0 4px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .field h3 .meta { color: var(--muted); font-weight: normal; font-size: 12px; }
+  .badge { font-size: 11px; border-radius: 4px; padding: 1px 6px; }
+  .badge.abstain { color: var(--warn); border: 1px solid var(--warn); }
+  .badge.ok { color: var(--ok); border: 1px solid var(--ok); }
+  .bar { display: grid; grid-template-columns: minmax(60px, 140px) minmax(0, 1fr) 56px; gap: 6px; align-items: center; font-size: 12px; }
   .bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; color: var(--muted); }
-  .err { color: var(--warn); }
+  .track { background: var(--soft); border-radius: 3px; height: 10px; overflow: hidden; }
+  .fill { background: var(--accent); height: 100%; }
+  .bar.win span:first-child { font-weight: 600; }
+  .timeline { display: flex; height: 16px; border-radius: 4px; overflow: hidden; background: var(--soft); margin: 6px 0; }
+  .timeline div { height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  details { border-top: 1px solid var(--line); padding: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; margin: 8px 0 0; background: var(--soft); border-radius: 6px; padding: 8px; max-height: 360px; overflow: auto; }
+  pre .img { color: var(--seg1); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 8px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: normal; }
+  td code { font-size: 12px; }
+  .table-wrap { overflow-x: auto; }
+  .err { color: var(--warn); white-space: pre-wrap; }
+  #history { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  #history button { background: var(--soft); color: var(--fg); padding: 4px; border: 1px solid var(--line); flex: 0 0 auto; text-align: left; font-size: 11px; width: 120px; }
+  #history img { width: 100%; height: 56px; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 2px; }
 </style>
 </head>
 <body>
-<h1>Vision Decision Playground</h1>
+<header>
+  <h1>Vision Decisions <span class="model" id="model"></span></h1>
+  <div style="min-width: 240px; flex: 1 1 240px; max-width: 360px"><label for="url">Server</label><input id="url" type="text" value="http://127.0.0.1:8080"></div>
+  <div style="flex: 0 1 180px"><label for="key">API key</label><input id="key" type="password" placeholder="optional" autocomplete="off"></div>
+</header>
 <main>
 <section>
-  <div class="row">
-    <div style="grid-column: span 2"><label>Server</label><input id="url" type="text" value="http://127.0.0.1:8080"></div>
-    <div><label>API key</label><input id="key" type="text" placeholder="optional"></div>
-  </div>
-  <label>Images</label>
-  <input id="files" type="file" accept="image/*" multiple>
+  <h2>Input</h2>
+  <div id="drop" tabindex="0">Drop images here, paste them, or click to choose<input id="files" type="file" accept="image/*" multiple hidden></div>
   <div id="thumbs"></div>
-  <label>Text after the images</label>
+  <label for="text">Text after the images</label>
   <input id="text" type="text" value="Answer the questions about this picture.">
-  <label>Schema</label>
-  <textarea id="schema">{
-  "shape": {"type": "enum", "choices": ["circle", "square", "triangle"], "description": "Which shape is drawn?"},
-  "color": {"type": "enum", "choices": ["red", "green", "blue", "yellow"], "description": "What colour are the shapes?"},
-  "count": {"type": "integer", "minimum": 1, "maximum": 4, "description": "How many shapes are there?"},
-  "dark_background": {"type": "boolean", "description": "Is the background dark?"}
-}</textarea>
+  <label for="preset">Schema</label>
+  <select id="preset"></select>
+  <textarea id="schema" spellcheck="false" style="margin-top: 6px"></textarea>
+  <div class="hint" id="schemaState"></div>
   <div class="row">
-    <div><label>Mode</label><select id="mode"><option>auto</option><option>tree</option><option>greedy</option></select></div>
-    <div><label>Temperature</label><input id="temp" type="number" value="1" min="0.05" step="0.05"></div>
-    <div><label>Abstain below p</label><input id="minp" type="number" value="0" min="0" max="1" step="0.05"></div>
+    <div><label for="mode">Mode</label><select id="mode"><option>auto</option><option>tree</option><option>greedy</option></select></div>
+    <div><label for="temp">Temperature</label><input id="temp" type="number" value="1" min="0.25" max="10" step="0.05"></div>
+    <div><label for="minp">Abstain below p</label><input id="minp" type="number" value="0" min="0" max="1" step="0.05"></div>
+    <div><label for="minm">Abstain below margin</label><input id="minm" type="number" value="0" min="0" max="1" step="0.05"></div>
   </div>
-  <button id="run">Decide</button>
+  <div class="actions">
+    <button id="run">Decide</button>
+    <label class="hint" style="margin: 0"><input id="trace" type="checkbox" checked> trace</label>
+    <label class="hint" style="margin: 0"><input id="cache" type="checkbox" checked> use cache</label>
+    <span class="hint">Ctrl+Enter</span>
+  </div>
+  <h2 style="margin-top: 18px">History</h2>
+  <div id="history"><span class="hint">Runs of this browser show up here.</span></div>
 </section>
-<section>
-  <div id="out"><pre>Pick an image and press Decide.</pre></div>
+<section id="out">
+  <h2>Result</h2>
+  <p class="hint">Pick an image and press Decide. Every value of every field comes back with its probability; the trace shows what the server did with the request.</p>
 </section>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
-let images = [];
-if (location.protocol.startsWith("http")) {
-  $("url").value = location.origin; // served by llama-server
-}
-
-$("files").addEventListener("change", async (e) => {
-  images = await Promise.all([...e.target.files].map((f) => new Promise((ok) => {
-    const r = new FileReader();
-    r.onload = () => ok(r.result);
-    r.readAsDataURL(f);
-  })));
-  $("thumbs").innerHTML = "";
-  for (const src of images) {
-    const img = document.createElement("img");
-    img.src = src;
-    $("thumbs").appendChild(img);
+const PRESETS = {
+  "Photo": {
+    person_visible: { type: "boolean", description: "Is a person visible?" },
+    people: { type: "integer", minimum: 0, maximum: 5, description: "How many people are visible?" },
+    setting: { type: "enum", choices: ["indoor", "outdoor", "unknown"], description: "Where was the photo taken?" },
+    main_subject: { type: "enum", choices: ["person", "animal", "vehicle", "building", "landscape", "object", "text", "unknown"], description: "What is the main subject?" },
+    lighting: { type: "enum", choices: ["bright", "normal", "dark"], description: "How is the lighting?" }
+  },
+  "Shapes (bench/shapes.py)": {
+    shape: { type: "enum", choices: ["circle", "square", "triangle", "unknown"], description: "Which shape is drawn? unknown if there is no shape." },
+    color: { type: "enum", choices: ["red", "green", "blue", "yellow", "unknown"], description: "What colour are the shapes? unknown if there is no shape." },
+    count: { type: "integer", minimum: 0, maximum: 4, description: "How many shapes are there?" },
+    dark_background: { type: "boolean", description: "Is the background dark?" }
+  },
+  "Document": {
+    is_document: { type: "boolean", description: "Is this a photo or scan of a document?" },
+    kind: { type: "enum", choices: ["invoice", "letter", "form", "receipt", "id_card", "other", "none"], description: "What kind of document is it?" },
+    readable: { type: "enum", choices: ["good", "partly", "no"], description: "How readable is the text?" },
+    handwriting: { type: "boolean", description: "Does it contain handwriting?" }
   }
-});
+};
+let images = [];
+let last = null;
 
 function el(tag, attrs, text) {
   const n = document.createElement(tag);
@@ -89,62 +141,298 @@ function el(tag, attrs, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
+function store(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage off */ } }
+function load(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
+function ms(v) { return v >= 1000 ? (v / 1000).toFixed(2) + " s" : v.toFixed(0) + " ms"; }
+function headers() {
+  const h = { "Content-Type": "application/json" };
+  if ($("key").value) h["Authorization"] = "Bearer " + $("key").value;
+  return h;
+}
+function base() { return $("url").value.replace(/\/$/, ""); }
 
-function render(res) {
+// ---- setup
+if (location.protocol.startsWith("http")) $("url").value = location.origin; // served by llama-server
+for (const name of Object.keys(PRESETS).concat(["Custom"])) $("preset").appendChild(el("option", { value: name }, name));
+$("preset").value = load("dp.preset", "Photo");
+$("schema").value = load("dp.schema", JSON.stringify(PRESETS[$("preset").value] || PRESETS["Photo"], null, 2));
+$("preset").addEventListener("change", () => {
+  if (PRESETS[$("preset").value]) $("schema").value = JSON.stringify(PRESETS[$("preset").value], null, 2);
+  checkSchema();
+});
+$("schema").addEventListener("input", () => { $("preset").value = "Custom"; checkSchema(); });
+function checkSchema() {
+  try {
+    const s = JSON.parse($("schema").value);
+    $("schemaState").textContent = Object.keys(s).length + " fields";
+    $("schemaState").className = "hint";
+    return s;
+  } catch (e) {
+    $("schemaState").textContent = "schema is not valid JSON: " + e.message;
+    $("schemaState").className = "err";
+    return null;
+  }
+}
+checkSchema();
+
+async function showModel() {
+  try {
+    const r = await fetch(base() + "/v1/models", { headers: headers() });
+    const js = await r.json();
+    const m = (js.data && js.data[0]) || (js.models && js.models[0]);
+    $("model").textContent = m ? String(m.id || m.name || "").split("/").pop() : "";
+  } catch (e) { $("model").textContent = ""; }
+}
+$("url").addEventListener("change", showModel);
+$("key").addEventListener("change", showModel);
+showModel();
+
+// ---- images: click, drop, paste
+function addFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) continue;
+    const r = new FileReader();
+    r.onload = () => { images.push({ name: f.name || "pasted image", url: r.result }); drawThumbs(); };
+    r.readAsDataURL(f);
+  }
+}
+function drawThumbs() {
+  const box = $("thumbs");
+  box.innerHTML = "";
+  images.forEach((im, i) => {
+    const t = el("div", { className: "thumb", title: im.name });
+    t.appendChild(el("img", { src: im.url, alt: im.name }));
+    const x = el("button", { className: "ghost", title: "remove" }, "x");
+    x.onclick = () => { images.splice(i, 1); drawThumbs(); };
+    t.appendChild(x);
+    box.appendChild(t);
+  });
+}
+$("drop").onclick = () => $("files").click();
+$("drop").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") $("files").click(); };
+$("files").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+$("drop").ondragover = (e) => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = (e) => { e.preventDefault(); $("drop").classList.remove("over"); addFiles(e.dataTransfer.files); };
+document.addEventListener("paste", (e) => addFiles([...e.clipboardData.items].filter((i) => i.kind === "file").map((i) => i.getAsFile())));
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); });
+
+// ---- request
+function buildRequest() {
+  const schema = checkSchema();
+  if (!schema) return null;
+  const parts = images.map((im) => ({ type: "image_url", image_url: { url: im.url } }));
+  if ($("text").value) parts.push({ type: "text", text: $("text").value });
+  const body = { schema, contexts: [parts.length ? parts : ($("text").value || " ")], mode: $("mode").value,
+                 temperature: parseFloat($("temp").value) || 1, return_probs: true, trace: $("trace").checked, cache_prompt: $("cache").checked };
+  const minp = parseFloat($("minp").value), minm = parseFloat($("minm").value);
+  if (minp > 0 || minm > 0) body.abstain = { min_probability: minp || 0, min_margin: minm || 0 };
+  return body;
+}
+function redacted(body) {
+  // request without the image bytes, for display and download
+  const copy = JSON.parse(JSON.stringify(body));
+  for (const c of copy.contexts) {
+    if (!Array.isArray(c)) continue;
+    for (const p of c) if (p.image_url) p.image_url.url = p.image_url.url.slice(0, 32) + "... (" + p.image_url.url.length + " chars)";
+  }
+  return copy;
+}
+
+async function run() {
+  const body = buildRequest();
+  if (!body) return;
+  store("dp.preset", $("preset").value); store("dp.schema", $("schema").value);
+  $("run").disabled = true;
   const out = $("out");
   out.innerHTML = "";
-  const r = res.results[0];
+  out.appendChild(el("h2", {}, "Result"));
+  out.appendChild(el("p", { className: "hint" }, "deciding..."));
+  const t0 = performance.now();
+  try {
+    const r = await fetch(base() + "/v1/decision", { method: "POST", headers: headers(), body: JSON.stringify(body) });
+    const js = await r.json();
+    if (!r.ok) throw new Error((js.error && js.error.message) || r.statusText);
+    last = { request: redacted(body), response: js, round_trip_ms: performance.now() - t0, at: new Date().toISOString() };
+    render(last);
+    remember(last);
+  } catch (e) {
+    out.innerHTML = "";
+    out.appendChild(el("h2", {}, "Result"));
+    out.appendChild(el("p", { className: "err" }, String(e.message || e)));
+  } finally {
+    $("run").disabled = false;
+  }
+}
+$("run").onclick = run;
+
+// ---- rendering
+function render(runData) {
+  const res = runData.response, r = res.results[0], out = $("out");
+  out.innerHTML = "";
+  const head = el("div", { className: "actions" });
+  head.style.marginTop = "0";
+  head.appendChild(el("h2", { style: "margin: 0 auto 0 0" }, "Result"));
+  const copy = el("button", { className: "ghost" }, "copy JSON");
+  copy.onclick = () => navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(runData, null, 2));
+  const dl = el("button", { className: "ghost" }, "download trace");
+  dl.onclick = () => {
+    const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(runData, null, 2)], { type: "application/json" })), download: "decision-trace.json" });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  head.appendChild(copy);
+  head.appendChild(dl);
+  out.appendChild(head);
+
+  out.appendChild(el("div", { className: "decision" }, JSON.stringify(r.decision, null, 1)));
+  if (r.abstained) {
+    out.appendChild(el("p", { className: r.abstained.length ? "err" : "hint" },
+      r.abstained.length ? "Escalate (below the abstain rule): " + r.abstained.join(", ") : "All fields pass the abstain rule."));
+  }
+
   for (const [name, f] of Object.entries(r.fields)) {
     const box = el("div", { className: "field" });
     const h = el("h3");
     h.appendChild(el("span", {}, name + " = " + JSON.stringify(f.value)));
-    if (f.abstain) h.appendChild(el("span", { className: "abstain" }, "abstain"));
+    h.appendChild(el("span", { className: "meta" }, "p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) + "  entropy " + f.entropy.toFixed(3) : "") + (f.tree ? "" : "  (greedy)")));
+    if (f.abstain !== undefined) h.appendChild(el("span", { className: "badge " + (f.abstain ? "abstain" : "ok") }, f.abstain ? "abstain" : "accept"));
     box.appendChild(h);
-    const probs = f.probs || [{ value: f.value, probability: f.probability }];
-    for (const c of probs) {
-      const bar = el("div", { className: "bar" });
-      bar.appendChild(el("span", {}, JSON.stringify(c.value)));
-      const track = el("div", { className: "track" });
-      const fill = el("div", { className: "fill" });
+    for (const c of (f.probs || [{ value: f.value, probability: f.probability }])) {
+      const bar = el("div", { className: "bar" + (JSON.stringify(c.value) === JSON.stringify(f.value) ? " win" : "") });
+      bar.appendChild(el("span", { title: JSON.stringify(c.value) }, JSON.stringify(c.value)));
+      const track = el("div", { className: "track" }), fill = el("div", { className: "fill" });
       fill.style.width = (100 * c.probability).toFixed(1) + "%";
       track.appendChild(fill);
       bar.appendChild(track);
       bar.appendChild(el("span", {}, (100 * c.probability).toFixed(1) + "%"));
       box.appendChild(bar);
     }
-    if (f.margin !== undefined) box.appendChild(el("pre", {}, "margin " + f.margin.toFixed(3) + "  entropy " + f.entropy.toFixed(3)));
     out.appendChild(box);
   }
-  out.appendChild(el("pre", {}, "timings " + JSON.stringify(res.timings, null, 1) + "\nusage " + JSON.stringify(res.usage, null, 1)));
+
+  // timing
+  const t = res.timings, enc = t.media_encode_ms || 0;
+  const segs = [["image encode", enc, "--seg1"], ["prefill", Math.max(t.prefill_ms - enc, 0), "--seg2"], ["field scoring", t.scoring_ms, "--seg3"]];
+  const tl = el("div", { className: "timeline", title: "server time " + ms(t.total_ms) });
+  const legend = el("div", { className: "legend" });
+  for (const [label, v, color] of segs) {
+    if (v <= 0) continue;
+    const d = el("div");
+    d.style.width = (100 * v / t.total_ms).toFixed(2) + "%";
+    d.style.background = "var(" + color + ")";
+    tl.appendChild(d);
+    const item = el("span");
+    const sw = el("i");
+    sw.style.background = "var(" + color + ")";
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(label + " " + ms(v)));
+    legend.appendChild(item);
+  }
+  legend.appendChild(el("span", {}, "server " + ms(t.total_ms) + ", round trip " + ms(runData.round_trip_ms)));
+  out.appendChild(el("h2", { style: "margin-top: 16px" }, "Time"));
+  out.appendChild(tl);
+  out.appendChild(legend);
+
+  // trace
+  out.appendChild(el("h2", { style: "margin-top: 16px" }, "Trace"));
+  const tr = res.trace, ct = r.trace;
+  if (tr && ct) {
+    const steps = el("details", { open: true });
+    steps.appendChild(el("summary", {}, "What happened"));
+    const ol = el("ol");
+    const imgs = ct.chunks.filter((c) => c.type === "image");
+    const lines = [
+      "Instructions and field list: " + tr.prefix_tokens + " tokens, " + (tr.prefix_cached ? "reused from the cache" : "decoded") + ".",
+      imgs.length ? imgs.length + " image" + (imgs.length > 1 ? "s" : "") + " encoded by the vision projector: " + imgs.map((c) => c.tokens + " tokens on " + c.positions + " positions" + (c.cached ? " (cached embedding)" : "")).join(", ") + "." : "No image in this context.",
+      "Context decoded into its own KV sequence from position " + ct.position_start + ": " + ct.chunks.map((c) => c.type + " " + c.tokens).join(" + ") + " tokens.",
+      "All " + tr.fields.length + " fields branch off that sequence at position " + ct.position_fields + " and are scored together (" + res.timings.rounds + " round" + (res.timings.rounds > 1 ? "s" : "") + ", " + res.usage.scored_rows + " rows, mode " + tr.mode + ").",
+      "The JSON is assembled from the scores, so it always matches the schema."
+    ];
+    for (const l of lines) ol.appendChild(el("li", {}, l));
+    steps.appendChild(ol);
+    out.appendChild(steps);
+
+    const prompt = el("details");
+    prompt.appendChild(el("summary", {}, "Prompt as the model sees it"));
+    const pre = el("pre");
+    pre.appendChild(document.createTextNode(tr.prompt_prefix));
+    ct.prompt.split("<image>").forEach((part, i, all) => {
+      pre.appendChild(document.createTextNode(part));
+      if (i < all.length - 1) pre.appendChild(el("span", { className: "img" }, "[image " + (i + 1) + "]"));
+    });
+    for (const f of tr.fields) pre.appendChild(document.createTextNode("\n  " + JSON.stringify(f.name) + ": <" + (f.values || f.candidates).join(" | ") + ">"));
+    prompt.appendChild(pre);
+    out.appendChild(prompt);
+
+    const chunks = el("details");
+    chunks.appendChild(el("summary", {}, "Chunks and positions"));
+    const w1 = el("div", { className: "table-wrap" }), t1 = el("table");
+    t1.appendChild(rowOf(["#", "type", "tokens", "positions", "image id", "cached"], "th"));
+    ct.chunks.forEach((c, i) => t1.appendChild(rowOf([i + 1, c.type, c.tokens, c.positions === undefined ? c.tokens : c.positions, c.id || "", c.cached === undefined ? "" : (c.cached ? "yes" : "no")])));
+    w1.appendChild(t1);
+    chunks.appendChild(w1);
+    chunks.appendChild(el("p", { className: "hint" }, "Fields start at position " + ct.position_fields + ", after " + ct.position_start + " prefix positions and " + (ct.position_fields - ct.position_start) + " context positions (" + r.usage.context_tokens + " context tokens). Group " + ct.group + " of " + tr.groups + "."));
+    out.appendChild(chunks);
+
+    const fields = el("details");
+    fields.appendChild(el("summary", {}, "Fields as scored"));
+    const w2 = el("div", { className: "table-wrap" }), t2 = el("table");
+    t2.appendChild(rowOf(["field", "values", "scored text after", "T", "abstain p", "abstain margin"], "th"));
+    for (const f of tr.fields) t2.appendChild(rowOf([f.name, (f.values || []).join(" | "), f.suffix.trim() + " ...", f.temperature, f.min_probability, f.min_margin]));
+    w2.appendChild(t2);
+    fields.appendChild(w2);
+    out.appendChild(fields);
+  } else {
+    out.appendChild(el("p", { className: "hint" }, "Enable trace to see the prompt, chunks and positions."));
+  }
+  const raw = el("details");
+  raw.appendChild(el("summary", {}, "Raw request and response"));
+  raw.appendChild(el("pre", {}, "request " + JSON.stringify(runData.request, null, 1) + "\n\nresponse " + JSON.stringify(res, null, 1)));
+  out.appendChild(raw);
+}
+function rowOf(cells, tag) {
+  const tr = el("tr");
+  for (const c of cells) tr.appendChild(el(tag || "td", {}, String(c)));
+  return tr;
 }
 
-$("run").addEventListener("click", async () => {
-  const out = $("out");
-  let schema;
-  try { schema = JSON.parse($("schema").value); } catch (e) { out.innerHTML = ""; out.appendChild(el("pre", { className: "err" }, "schema: " + e.message)); return; }
-  const parts = images.map((u) => ({ type: "image_url", image_url: { url: u } }));
-  if ($("text").value) parts.push({ type: "text", text: $("text").value });
-  const body = { schema, contexts: [parts.length ? parts : $("text").value], mode: $("mode").value,
-                 temperature: parseFloat($("temp").value), return_probs: true };
-  const minp = parseFloat($("minp").value);
-  if (minp > 0) body.abstain = { min_probability: minp };
-  const headers = { "Content-Type": "application/json" };
-  if ($("key").value) headers["Authorization"] = "Bearer " + $("key").value;
-  $("run").disabled = true;
-  out.innerHTML = "";
-  out.appendChild(el("pre", {}, "deciding..."));
-  try {
-    const r = await fetch($("url").value.replace(/\/$/, "") + "/v1/decision", { method: "POST", headers, body: JSON.stringify(body) });
-    const js = await r.json();
-    if (!r.ok) throw new Error(js.error ? js.error.message : r.statusText);
-    render(js);
-  } catch (e) {
-    out.innerHTML = "";
-    out.appendChild(el("pre", { className: "err" }, String(e.message || e)));
-  } finally {
-    $("run").disabled = false;
+// ---- history (this browser only)
+function thumbOf(url) {
+  return new Promise((ok) => {
+    if (!url) return ok("");
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = 120; c.height = 56;
+      const s = Math.max(120 / img.width, 56 / img.height);
+      c.getContext("2d").drawImage(img, (120 - img.width * s) / 2, (56 - img.height * s) / 2, img.width * s, img.height * s);
+      ok(c.toDataURL("image/jpeg", 0.7));
+    };
+    img.onerror = () => ok("");
+    img.src = url;
+  });
+}
+async function remember(runData) {
+  const h = load("dp.history", []);
+  h.unshift({ thumb: await thumbOf(images[0] && images[0].url), run: runData });
+  store("dp.history", h.slice(0, 10));
+  drawHistory();
+}
+function drawHistory() {
+  const h = load("dp.history", []), box = $("history");
+  if (!h.length) return;
+  box.innerHTML = "";
+  for (const entry of h) {
+    const b = el("button", { title: entry.run.at });
+    if (entry.thumb) b.appendChild(el("img", { src: entry.thumb, alt: "" }));
+    const d = entry.run.response.results[0].decision;
+    b.appendChild(el("span", {}, Object.values(d).slice(0, 3).map((v) => JSON.stringify(v)).join(" ")));
+    b.onclick = () => { last = entry.run; render(entry.run); };
+    box.appendChild(b);
   }
-});
+}
+drawHistory();
 </script>
 </body>
 </html>

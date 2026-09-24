@@ -449,7 +449,8 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         }
         return n;
     };
-    for (size_t g0 = 0, n_group = 0; g0 < contexts.size(); g0 += n_group) {
+    int n_groups = 0;
+    for (size_t g0 = 0, n_group = 0; g0 < contexts.size(); g0 += n_group, ++n_groups) {
         n_group = group_size(g0);
 
         const auto tp = std::chrono::steady_clock::now();
@@ -548,6 +549,8 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             result & r = out.items[g0 + i];
             r.context_tokens = contexts[g0 + i].prefill ? contexts[g0 + i].n_tokens : prefixes[g0 + i].size();
             r.rows           = total;
+            r.pos_fields     = pos_next[g0 + i];
+            r.group          = n_groups;
             for (auto & fd : state[i]) {
                 if (fd.use_tree && fd.probs.empty()) {
                     fd.finish_tree({});
