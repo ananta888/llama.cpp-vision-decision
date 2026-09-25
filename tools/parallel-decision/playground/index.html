@@ -172,6 +172,13 @@
     <div><label for="minm">Abstain below margin</label><input id="minm" type="number" value="0" min="0" max="1" step="0.05"></div>
   </div>
   <div class="row">
+    <div><label for="prune" title="tree fields: open a digit subtree only when it is reached with at least this probability (more rounds, fewer rows)">Prune below p</label><input id="prune" type="number" value="0" min="0" max="0.5" step="0.01"></div>
+    <div><label for="numstep" title="integer fields with more than 20 values get this step (e.g. sizes in 5 cm)">Number step</label><select id="numstep">
+      <option value="1">1 (every value)</option><option value="2">2</option><option value="5">5</option><option value="10">10</option></select></div>
+    <div><label class="hint" style="margin-top: 22px" title="describe number fields as a range in the prompt instead of listing every value: a much shorter prompt"><input id="compact" type="checkbox"> compact ranges</label></div>
+  </div>
+  <div class="hint">For a CPU: compact ranges shorten the prompt a lot; greedy or pruning then need fewer rows. Exact tree probabilities are cheap on a GPU.</div>
+  <div class="row">
     <div><label for="maxside">Max image size</label><select id="maxside">
       <option value="512">512 px</option><option value="768">768 px</option><option value="1024" selected>1024 px</option>
       <option value="1536">1536 px</option><option value="0">original</option></select></div>
@@ -392,6 +399,16 @@ async function buildRequest() {
                  temperature: parseFloat($("temp").value) || 1, return_probs: true, trace: $("trace").checked, cache_prompt: $("cache").checked, share_tokens: $("share").checked };
   const minp = parseFloat($("minp").value), minm = parseFloat($("minm").value);
   if (minp > 0 || minm > 0) body.abstain = { min_probability: minp || 0, min_margin: minm || 0 };
+  const prune = parseFloat($("prune").value);
+  if (prune > 0) body.tree_prune = prune;
+  if ($("compact").checked) body.compact_ranges = true;
+  const step = parseInt($("numstep").value, 10);
+  if (step > 1 && !schema.properties) {
+    body.schema = JSON.parse(JSON.stringify(schema));
+    for (const f of Object.values(body.schema)) {
+      if (f.type === "integer" && f.step === undefined && f.maximum - f.minimum + 1 > 20) f.step = step;
+    }
+  }
   return body;
 }
 function redacted(body) {
@@ -424,22 +441,27 @@ function allowedOf(f) {
   if (f.type === "number") return f.minimum + " to " + f.maximum + " in steps of " + f.step;
   return "true, false";
 }
-function systemTextOf(schema, instructions) {
+function systemTextOf(schema, instructions, compact) {
   // the field catalogue the decision puts in the system message (compile_schema)
   const lines = [];
   for (const [n, f] of Object.entries(schema)) {
     let vals;
     if (f.choices || f.enum) vals = (f.choices || f.enum).map((v) => JSON.stringify(v));
     else if (f.type === "boolean") vals = ["true", "false"];
-    else if (f.type === "integer") { vals = []; for (let v = f.minimum; v <= f.maximum; v++) vals.push(String(v)); }
+    else if (f.type === "integer") { vals = []; for (let v = f.minimum; v <= f.maximum; v += f.step || 1) vals.push(String(v)); }
     else {
       const dec = (x) => { const t = String(x); return t.includes(".") ? t.split(".")[1].length : 0; };
       const places = Math.max(dec(f.minimum), dec(f.maximum), dec(f.step));
       vals = [];
       for (let i = 0; f.minimum + i * f.step <= f.maximum + 1e-9; i++) vals.push((f.minimum + i * f.step).toFixed(places));
     }
-    if (f.nullable) vals.push("null");
-    lines.push(JSON.stringify(n) + (f.description ? ": " + f.description : "") + "\nAllowed values: " + vals.join(", "));
+    let allowed = vals.concat(f.nullable ? ["null"] : []).join(", ");
+    if (compact && (f.type === "integer" || f.type === "number") && vals.length > 2) {
+      const step = f.type === "integer" ? (f.step || 1) : f.step;
+      allowed = (f.type === "integer" ? "integers" : "numbers") + " from " + vals[0] + " to " + vals[vals.length - 1] +
+                (f.type === "integer" && step === 1 ? "" : " in steps of " + step) + (f.nullable ? ", or null" : "");
+    }
+    lines.push(JSON.stringify(n) + (f.description ? ": " + f.description : "") + "\nAllowed values: " + allowed);
   }
   return "Select the requested field value from its allowed values, based on the context. Respond with the JSON value only.\n\nFields:\n" +
          lines.join("\n") + "\n" + (instructions || "");
@@ -509,7 +531,7 @@ async function run(opts) {
     if (mode !== "decision") {
       step = mode === "compare" ? "decision done, chat..." : "chat...";
       const fromTrace = runData.response && runData.response.trace && runData.response.trace.instructions;
-      const system = fromTrace || systemTextOf(body.schema, body.instructions);
+      const system = fromTrace || systemTextOf(body.schema, body.instructions, body.compact_ranges);
       const creq = chatRequest(body, system);
       const c = await post("/v1/chat/completions", creq);
       runData.chat = { request: redacted({ contexts: [creq.messages[1].content], rest: Object.assign({}, creq, { messages: undefined }), system }),

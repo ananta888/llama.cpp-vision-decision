@@ -106,7 +106,7 @@ Compact fields, or a JSON Schema object with `properties`:
 |---|---|---|
 | `enum` | `choices` (or `enum`) | 1-255 values |
 | `boolean` | - | true / false |
-| `integer` | `minimum`, `maximum` | 1-255 values |
+| `integer` | `minimum`, `maximum`, optional `step` (`multipleOf` in JSON Schema) | 1-255 values; `step` counts from the minimum |
 | `number` | `minimum`, `maximum`, `step` (`multipleOf` in JSON Schema) | fixed-width decimals |
 
 Numeric fields take `aggregate`: `mode` (default), `median` or `mean`.
@@ -128,6 +128,8 @@ Every field also takes `temperature` and `abstain` (`x-temperature` / `x-abstain
 | `tree_max` | 128 | per-field switch between tree and greedy |
 | `cache_prompt` | true | reuse the cached instructions + schema prefix |
 | `share_tokens` | true | decode tokens that branches have in common (field suffix, leading digits) once; `false` gives every branch its own copy, as before |
+| `tree_prune` | 0 | tree fields: open a trie node only when it is reached with at least this probability; a subtree left closed spreads its probability evenly over its values. More rounds, fewer rows |
+| `compact_ranges` | false | describe numeric fields in the prompt as a range (`integers from 0 to 249, or null`) instead of listing every value |
 | `temperature` | 1.0 | default temperature of every field |
 | `abstain` | none | default `{"min_probability": p, "min_margin": m}` of every field |
 | `return_probs` | false | list every allowed value of a tree field with its probability |
@@ -336,6 +338,33 @@ branches, `usage.decoded_rows` the rows decoded.
   equal decoding every branch on its own sequence exactly; on CUDA both layouts differ from that by up to about 0.5 in
   the logits (kernels depend on the batch shape), probabilities by up to 0.04, and near-ties can flip (95-100% of the
   decisions were the same).
+
+### Numbers on a CPU
+
+On a CPU every decoded row costs, and every output row most (the model computes logits over the whole vocabulary),
+while a GPU decodes a few hundred rows about as fast as one. Wide numeric fields therefore have their own switches:
+
+- `compact_ranges`: by default the prompt lists every allowed value, 250 per field for 0-249. Five such fields make a
+  5000 token prefix that every branch row attends to. As a range the prefix has 274 tokens.
+- `step` on integer fields: fewer values, fewer trie nodes with a choice, fewer outputs.
+- `tree_prune` and `mode: greedy`: fewer rows in more rounds. A round continues the paths kept from the round before,
+  so it decodes only the new digits. Worth it once the prefix is short; with a 5000 token prefix every round is slow.
+
+Qwen3-VL-2B Q8_0 on the CPU, 12 images with one rectangle of known position and size, 4 nullable pixel fields
+(0-249), median per image, mean absolute error over the 48 values:
+
+| variant | time | error |
+|---|---|---|
+| every value listed, tree (exact) | 4.28 s | 48.8 px |
+| `compact_ranges`, tree (exact) | 1.58 s | 46.4 px |
+| `compact_ranges`, `tree_prune` 0.05 | 1.01 s | 46.4 px |
+| `compact_ranges`, greedy | 0.99 s | 46.4 px |
+| `compact_ranges`, tree, `aggregate: median` | 1.65 s | 43.8 px |
+| chat with `json_schema` | 6.52 s | 60.6 px |
+
+A cold request (prefix not cached) drops from 43.5 s to 2.9 s with `compact_ranges`. The 2B model is not good at
+pixel geometry, but the shorter prompt does not make it worse. The playground has all of them ("Prune below p",
+"Number step", "compact ranges").
 
 ## Checking a model
 
