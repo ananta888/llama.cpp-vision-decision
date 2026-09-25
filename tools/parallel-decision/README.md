@@ -130,6 +130,8 @@ Every field also takes `temperature` and `abstain` (`x-temperature` / `x-abstain
 | `share_tokens` | true | decode tokens that branches have in common (field suffix, leading digits) once; `false` gives every branch its own copy, as before. Off for models with recurrent layers, whose state is per sequence |
 | `tree_prune` | 0 | tree fields: open a trie node only when it is reached with at least this probability; a subtree left closed spreads its probability evenly over its values. More rounds, fewer rows |
 | `compact_ranges` | false | describe numeric fields in the prompt as a range (`integers from 0 to 249, or null`) instead of listing every value |
+| `layout` | `schema_first` | `schema_first`: the field list in the system message, before the context (cached with the instructions). `context_first`: only the task in the system message; the context, then the field list after it, so a cached context serves any questions |
+| `cache_context` | true | with `--decision-ctx-cache N`: reuse a context an earlier request decoded after the same prefix, and keep this one |
 | `temperature` | 1.0 | default temperature of every field |
 | `abstain` | none | default `{"min_probability": p, "min_margin": m}` of every field |
 | `return_probs` | false | list every allowed value of a tree field with its probability |
@@ -385,6 +387,38 @@ measures latency.
 
 `llama-parallel-decision` runs the same engine from a worker process (stdin/stdout protocol, one JSON request per
 line). Environment: `DECIDE_TREE`, `DECIDE_TREE_MAX`, `DECIDE_NSEQ`, `DECIDE_SPLIT_BOUNDARY`.
+
+## Long contexts and the context cache
+
+Reading a long context is most of the cost; the questions after it are cheap. `--decision-ctx-cache N` reserves N of
+the `--decision-seqs` sequences for decoded contexts: after a request, its prefix and context cells (and, for hybrid
+models, the recurrent state) stay in one of them. A later request with the same prefix and the same context (the text,
+or the text and the image ids) copies them instead of decoding or encoding again; `usage.contexts_cached` and each
+result's `context_cached` say so. With the default layout the prefix holds the field list, so only the same questions
+hit the cache; with `"layout": "context_first"` the field list follows the context and new questions about the same
+text or images hit it too. The oldest entry goes when the slots or the KV cache run out, and when a chat slot finds no
+room in the unified KV cache the server gives the cached contexts (then the cached prefix) back before shrinking its
+batch.
+
+Bonsai 2 27B (hybrid, CUDA, RTX 5060 Ti 16 GB), 64k context with a q8_0 KV cache, 60k tokens of source code (4 files),
+20 questions per request (12 "is a function named X defined", real and made-up names, 8 "which file defines Y"):
+
+| request | decision (`context_first`, cache) | chat with `json_schema` |
+|---|---|---|
+| questions A, first request | 81.5 s (80.3 s reading, 1.1 s scoring), 20/20 | 111.1 s (102.8 s reading, 8.2 s writing 224 tokens), 20/20 |
+| questions B, same code | 2.4 s (context from the cache), 20/20 | 9.8 s (prompt cache: 1.3 s reading, 8.4 s writing), 20/20 |
+
+How much context fits (same card, 4 decision sequences unless noted; a hybrid model keeps a recurrent state per
+sequence, about 155 MB each for this model):
+
+| context | KV cache | VRAM | long prompt | three facts hidden at 10/50/90% |
+|---|---|---|---|---|
+| 64k | q8_0, 12 sequences | 12.1 GB | 61k tokens in 81 s (762 tok/s) | 3/3 |
+| 128k | q8_0, 12 sequences | 14.6 GB | 117k tokens in 189 s (616 tok/s) | 3/3 |
+| 128k | f16 | 16.0 GB | spills into shared memory: 16 tok/s | - |
+| 256k | q4_0 + PrismML mean-centering bias, 12 sequences | 15.5 GB | 202k tokens in 425 s (477 tok/s), writing 7.5 tok/s | 3/3 |
+
+A quantized KV cache is rotated (Hadamard) before it is quantized; llama.cpp does that by itself.
 
 ## Tool calls
 
