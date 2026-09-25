@@ -109,6 +109,10 @@ class engine {
     batch_result decide_batch(const std::string & shared_text, const std::vector<context_input> & contexts,
                               const std::vector<field_input> & fields, const options & opt);
 
+    // Give KV cells back to other users of the context (e.g. chat slots that ran out of room): first the
+    // context cache, on the next call the cached prefix. Returns false when nothing was held.
+    bool release_cached();
+
   private:
     struct prompt_part {
         const tokens_t * toks;

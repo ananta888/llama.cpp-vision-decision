@@ -512,6 +512,22 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
     return result;
 }
 
+bool engine::release_cached() {
+    if (!ctx_cache.empty()) {
+        for (const auto & e : ctx_cache) {
+            llama_memory_seq_rm(mem, e.seq, -1, -1);
+        }
+        ctx_cache.clear();
+        return true;
+    }
+    if (!cached.empty()) {
+        llama_memory_seq_rm(mem, seq_snap, -1, -1);
+        cached.clear();
+        return true;
+    }
+    return false;
+}
+
 void engine::drop_kept() {
     for (const auto & k : kept) {
         llama_memory_seq_rm(mem, k.seq, -1, -1);
