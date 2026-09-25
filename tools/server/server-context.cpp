@@ -2586,8 +2586,13 @@ private:
         const bool context_first = layout == "context_first";
         std::string shared, context_tail;
         std::vector<std::string> dynamic;
+        // chat templates trim message content; the field list ends the user message here, so trim it the same way
+        std::string fields_text = cs.fields_text;
+        while (!fields_text.empty() && std::isspace((unsigned char) fields_text.back())) {
+            fields_text.pop_back();
+        }
         for (const auto & c : contexts) {
-            const std::string user = context_first ? c + "\n\n" + cs.fields_text : c;
+            const std::string user = context_first ? c + "\n\n" + fields_text : c;
             auto [head, tail] = llama_decision::render_prompt(chat_params.tmpls.get(), chat_params.use_jinja,
                                                               context_first ? cs.task_text : cs.system_text, user);
             if (dynamic.empty()) {
