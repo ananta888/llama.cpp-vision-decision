@@ -2570,7 +2570,7 @@ private:
                                                                         params_base.n_seq_decision);
         }
         json calibration = json::object();
-        for (const char * key : { "temperature", "abstain" }) {
+        for (const char * key : { "temperature", "abstain", "compact_ranges" }) {
             if (body.contains(key)) {
                 calibration[key] = body.at(key);
             }
@@ -2592,6 +2592,10 @@ private:
         opt.tree_max    = (size_t) body.value("tree_max", 128);
         opt.allow_cache = body.value("cache_prompt", true);
         opt.share_tokens = body.value("share_tokens", true);
+        opt.tree_prune   = body.value("tree_prune", 0.0f);
+        if (!(opt.tree_prune >= 0.0f && opt.tree_prune < 1.0f)) {
+            throw std::invalid_argument("tree_prune must be in [0, 1)");
+        }
 
         // contexts with media are split into chunks by libmtmd and prefilled on their trunk by the engine
         decision_media.max_bytes = (size_t) params_base.decision_media_cache * 1024 * 1024;
@@ -2729,7 +2733,7 @@ private:
                                         { "position_fields", r.pos_fields }, { "group", r.group } };
             }
             trace = { { "instructions", cs.system_text }, { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
-                      { "mode", opt.mode }, { "share_tokens", opt.share_tokens }, { "groups", n_groups }, { "fields", fields } };
+                      { "mode", opt.mode }, { "share_tokens", opt.share_tokens }, { "tree_prune", opt.tree_prune }, { "groups", n_groups }, { "fields", fields } };
         }
         json out = json::object();
         out["object"]  = "decision";

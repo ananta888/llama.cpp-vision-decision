@@ -7,8 +7,8 @@
 // field's value is scored as token paths following that field's own suffix; every scored path
 // runs as its own sequence forked from the context (llama_memory_seq_cp), so all fields are
 // evaluated in one batched llama_decode and cannot see each other. Small fields score every
-// divergence node of their token trie at once and return the exact constrained distribution;
-// larger fields walk the trie greedily.
+// divergence node of their token trie at once and return the exact constrained distribution
+// (with tree_prune only the likely subtrees, in rounds); larger fields walk the trie greedily.
 
 #include "llama.h"
 #include "json.h"
@@ -46,6 +46,7 @@ struct options {
     bool        split_boundary = false;  // legacy: tokenise suffix and values separately
     bool        allow_cache    = true;   // reuse the cached static prefix when it matches
     bool        share_tokens   = true;   // decode tokens that branches have in common once (a trie)
+    float       tree_prune     = 0.0f;   // tree fields: open a trie node only when reached with at least this probability
 };
 
 struct field_result {
@@ -114,6 +115,13 @@ class engine {
         tokens_t     toks;
         tokens_t     cands;
     };
+    // a branch path decoded in the last round and still held in the KV cache by `seq`
+    struct kept_path {
+        llama_seq_id trunk;
+        llama_pos    pos0;
+        tokens_t     toks;
+        llama_seq_id seq;
+    };
 
     llama_context     * ctx;
     const llama_vocab * vocab;
@@ -122,11 +130,13 @@ class engine {
     int                 n_pool;
     tokens_t            cached;
     int                 rows_decoded = 0; // branch rows decoded by the last decide_batch (shared tokens once)
+    std::vector<kept_path> kept;          // paths kept for the next round of score_branches
 
     tokens_t tokenize(const std::string & text, bool add_special) const;
     void     decode_parts(const std::vector<prompt_part> & parts);
     bool     prepare_prefix(const tokens_t & shared, bool allow_cache);
     void     clear_pool();
+    void     drop_kept();
     std::vector<std::vector<float>> score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free, bool share);
 };
 
@@ -155,7 +165,8 @@ struct compiled_schema {
 // Accepts compact field specs {"name": {"type": ..., "description": ..., ...}} or a JSON Schema
 // object with "properties" (boolean, string+enum, integer min/max, number min/max/multipleOf).
 // defaults: request-wide {"temperature": T, "abstain": {"min_probability": p, "min_margin": m}}; a field's
-// own "temperature" / "abstain" ("x-temperature" / "x-abstain" in JSON Schema) wins.
+// own "temperature" / "abstain" ("x-temperature" / "x-abstain" in JSON Schema) wins. "compact_ranges": true
+// describes numeric fields as a range in the catalogue instead of listing every value.
 compiled_schema compile_schema(const common_json & schema, const std::string & instructions,
                                const common_json & defaults = common_json::object());
 

@@ -4,6 +4,7 @@
 #include "common.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -28,6 +29,11 @@ struct decision_field {
 
     std::vector<tokens_t> node_prefix;   // tree: trie nodes with more than one allowed next token
     std::vector<tokens_t> node_options;
+    std::vector<int>      node_parent;     // nearest node above, -1 for the root
+    std::vector<int>      node_parent_opt; // option of the parent that leads here
+    std::vector<int>      node_paths;      // candidate paths below the node
+    std::vector<std::vector<float>> node_logp; // log-probabilities of the options, empty until scored
+    std::vector<bool>     node_queued;
     std::vector<float>    probs;
 
     bool  use_tree     = false;
@@ -79,14 +85,21 @@ struct decision_field {
     }
 
     void build_nodes() {
-        std::vector<std::pair<std::vector<int>, size_t>> stack;
+        // (paths below, depth, parent node, option of the parent that leads here)
+        struct item {
+            std::vector<int> act;
+            size_t           depth;
+            int              parent;
+            int              opt;
+        };
+        std::vector<item> stack;
         std::vector<int> root(paths.size());
         for (int i = 0; i < (int) paths.size(); ++i) {
             root[i] = i;
         }
-        stack.push_back({ root, 0 });
+        stack.push_back({ root, 0, -1, -1 });
         while (!stack.empty()) {
-            auto [act, depth] = stack.back();
+            auto [act, depth, parent, popt] = stack.back();
             stack.pop_back();
             if (act.size() <= 1) {
                 continue;
@@ -103,16 +116,62 @@ struct decision_field {
             if (opts.size() > 1) {
                 node_prefix.emplace_back(paths[act[0]].begin(), paths[act[0]].begin() + depth);
                 node_options.push_back(opts);
+                node_parent.push_back(parent);
+                node_parent_opt.push_back(popt);
+                node_paths.push_back((int) act.size());
+                parent = (int) node_prefix.size() - 1;
             }
-            for (llama_token tok : opts) {
+            for (size_t k = 0; k < opts.size(); ++k) {
                 std::vector<int> sub;
                 for (int i : act) {
-                    if (paths[i][depth] == tok) {
+                    if (paths[i][depth] == opts[k]) {
                         sub.push_back(i);
                     }
                 }
-                stack.push_back({ sub, depth + 1 });
+                stack.push_back({ sub, depth + 1, parent, opts.size() > 1 ? (int) k : popt });
             }
+        }
+        node_logp.assign(node_prefix.size(), {});
+        node_queued.assign(node_prefix.size(), false);
+    }
+
+    // probability of reaching node n (product of the scored options above it)
+    float reach(int n) const {
+        float p = 1.0f;
+        for (; node_parent[n] >= 0; n = node_parent[n]) {
+            p *= std::exp(node_logp[node_parent[n]][node_parent_opt[n]]);
+        }
+        return p;
+    }
+
+    // tree nodes to score next: all of them at once without pruning; with pruning the nodes whose
+    // parent is scored and that are reached with at least `prune`
+    std::vector<int> next_nodes(float prune) {
+        std::vector<int> out;
+        for (int n = 0; n < (int) node_prefix.size(); ++n) {
+            if (node_queued[n]) {
+                continue;
+            }
+            const int par = node_parent[n];
+            if (prune > 0.0f && par >= 0 && (node_logp[par].empty() || reach(n) < prune)) {
+                continue;
+            }
+            node_queued[n] = true;
+            out.push_back(n);
+        }
+        return out;
+    }
+
+    void set_node(int n, const std::vector<float> & s) {
+        const float mx = *std::max_element(s.begin(), s.end());
+        double z = 0;
+        for (float x : s) {
+            z += std::exp(x - mx);
+        }
+        const float lz = mx + (float) std::log(z);
+        node_logp[n].clear();
+        for (float x : s) {
+            node_logp[n].push_back(x - lz);
         }
     }
 
@@ -124,28 +183,26 @@ struct decision_field {
         return n;
     }
 
-    // Exact constrained distribution: log-softmax at each node over its allowed tokens,
-    // summed along every candidate path, normalised over candidates.
-    void finish_tree(const std::vector<std::vector<float>> & node_scores) {
-        std::vector<std::vector<float>> node_logp;
-        for (const auto & s : node_scores) {
-            const float mx = *std::max_element(s.begin(), s.end());
-            double z = 0;
-            for (float x : s) {
-                z += std::exp(x - mx);
-            }
-            const float lz = mx + (float) std::log(z);
-            std::vector<float> lp;
-            for (float x : s) {
-                lp.push_back(x - lz);
-            }
-            node_logp.push_back(lp);
-        }
+    // Constrained distribution: log-softmax at each node over its allowed tokens, summed along every
+    // candidate path, normalised over candidates. Exact when every node is scored; a subtree left out
+    // by pruning spreads the probability of reaching it evenly over its values.
+    void finish_tree() {
         std::vector<float> path_lp(paths.size(), 0.0f);
+        scored_nodes = 0;
+        for (const auto & lp : node_logp) {
+            scored_nodes += lp.empty() ? 0 : 1;
+        }
         for (size_t i = 0; i < paths.size(); ++i) {
+            int open = -1; // shallowest node on the path that was not scored
             for (size_t n = 0; n < node_prefix.size(); ++n) {
                 const auto & pre = node_prefix[n];
                 if (pre.size() >= paths[i].size() || !std::equal(pre.begin(), pre.end(), paths[i].begin())) {
+                    continue;
+                }
+                if (node_logp[n].empty()) {
+                    if (open < 0 || pre.size() < node_prefix[open].size()) {
+                        open = (int) n;
+                    }
                     continue;
                 }
                 const auto & opts = node_options[n];
@@ -154,6 +211,10 @@ struct decision_field {
                     throw std::runtime_error("candidate token missing from its trie node");
                 }
                 path_lp[i] += node_logp[n][it - opts.begin()];
+            }
+            if (open >= 0) {
+                // nodes below an open node are open too: a node is scored only after its parent
+                path_lp[i] -= std::log((float) node_paths[open]);
             }
         }
         for (float & x : path_lp) {
@@ -168,9 +229,8 @@ struct decision_field {
         for (float x : path_lp) {
             probs.push_back((float) (std::exp(x - path_lp[best]) / z));
         }
-        winner       = best;
-        path_score   = probs[best];
-        scored_nodes = (int) node_prefix.size();
+        winner     = best;
+        path_score = probs[best];
     }
 };
 
@@ -244,41 +304,89 @@ void engine::clear_pool() {
     for (llama_seq_id s = seq_pool; s < seq_pool + n_pool; ++s) {
         llama_memory_seq_rm(mem, s, -1, -1);
     }
+    kept.clear();
 }
 
 // Score each branch forked from its trunk; return each branch's last-token logits restricted to its
 // candidate tokens. Branches of a trunk that start with the same tokens (the field suffix, shared
 // digits of numbers) share them: the branches form a trie, each trie token is decoded once and
-// belongs to every sequence below it, with one sequence per trie leaf. Groups are bounded by free
-// sequences (outputs) and batch rows.
+// belongs to every sequence below it, with one sequence per trie leaf. Groups are bounded by the
+// outputs the context takes (n_free), free sequences and batch rows.
+//
+// With sharing, up to a third of the sequences keep their decoded path for the next call (the next
+// round of greedy or pruned tree fields): a branch that continues a kept path copies its cells up to
+// the common tokens and decodes only the rest. Kept paths of the call before are freed at the end.
 std::vector<std::vector<float>> engine::score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free, bool share) {
     struct node {
         llama_token      tok;
         llama_pos        pos;
-        llama_seq_id     trunk;
+        int              base;
         int              parent;
         std::vector<int> kids;
         bool             out = false;
     };
+    // where the cells before a path's first new token come from: the trunk (end -1: all of it) or a
+    // kept path cut at `end`
+    struct base_t {
+        llama_seq_id src;
+        llama_pos    end;
+        llama_seq_id trunk;
+        llama_pos    pos0;
+        tokens_t     prefix; // branch tokens already in src
+    };
+    const std::vector<kept_path> prev = std::move(kept);
+    kept.clear();
+    std::vector<bool> busy(n_free, false);
+    for (const auto & k : prev) {
+        busy[k.seq - first] = true;
+    }
+    const int keep_max = share ? n_free / 3 : 0;
+
     std::vector<std::vector<float>> result(branches.size());
     const int max_rows = (int) llama_n_batch(ctx);
     size_t start = 0;
     while (start < branches.size()) {
         std::vector<node> nodes;
-        std::vector<std::pair<llama_seq_id, int>> roots; // (trunk, first node of a path)
+        std::vector<base_t> bases;
+        std::vector<std::pair<int, int>> roots; // (base, first node of a path)
         std::vector<int> end_node;
-        int n_out = 0;
+        const int n_ids = (int) std::count(busy.begin(), busy.end(), false);
+        int n_out = 0, n_leaves = 0;
         size_t end = start;
         for (; end < branches.size(); ++end) {
             const branch & b = branches[end];
+            // continue the longest kept path of the same trunk; at least one token is decoded for the logits
+            const kept_path * from = nullptr;
+            size_t skip = 0;
+            for (const auto & k : prev) {
+                if (!share || k.trunk != b.trunk || k.pos0 != b.pos0) {
+                    continue;
+                }
+                size_t l = 0;
+                while (l < k.toks.size() && l + 1 < b.toks.size() && k.toks[l] == b.toks[l]) {
+                    ++l;
+                }
+                if (l > skip) {
+                    skip = l;
+                    from = &k;
+                }
+            }
+            const llama_seq_id src     = from ? from->seq : b.trunk;
+            const llama_pos    src_end = from ? b.pos0 + (llama_pos) skip : -1;
+            int bi = -1;
+            for (int x = 0; x < (int) bases.size(); ++x) {
+                if (bases[x].src == src && bases[x].end == src_end) {
+                    bi = x;
+                }
+            }
             // follow the tokens that are already in the trie; without sharing every branch is its own path
             int cur = -1;
-            size_t i = 0;
-            for (; share && i < b.toks.size(); ++i) {
+            size_t i = skip;
+            for (; share && bi >= 0 && i < b.toks.size(); ++i) {
                 int next = -1;
                 if (cur < 0) {
-                    for (const auto & [t, n] : roots) {
-                        if (t == b.trunk && nodes[n].tok == b.toks[i]) {
+                    for (const auto & [x, n] : roots) {
+                        if (x == bi && nodes[n].tok == b.toks[i]) {
                             next = n;
                         }
                     }
@@ -294,25 +402,31 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
                 }
                 cur = next;
             }
-            // every output row counts (the context sizes its outputs by the decision sequences);
-            // leaves, which need a sequence each, are never more than outputs
+            // every output row counts (the context sizes its outputs by the decision sequences); a new
+            // path needs a sequence unless it extends a leaf
             const int new_rows = (int) (b.toks.size() - i);
             const int new_out  = new_rows > 0 || !nodes[cur].out ? 1 : 0;
-            if (n_out + new_out > n_free || (int) nodes.size() + new_rows > max_rows) {
+            const int new_leaf = new_rows > 0 && (cur < 0 || !nodes[cur].kids.empty()) ? 1 : 0;
+            if (n_out + new_out > n_free || n_leaves + new_leaf > n_ids || (int) nodes.size() + new_rows > max_rows) {
                 break;
             }
+            if (bi < 0) {
+                bases.push_back({ src, src_end, b.trunk, b.pos0, tokens_t(b.toks.begin(), b.toks.begin() + skip) });
+                bi = (int) bases.size() - 1;
+            }
             for (; i < b.toks.size(); ++i) {
-                nodes.push_back({ b.toks[i], b.pos0 + (llama_pos) i, b.trunk, cur, {} });
+                nodes.push_back({ b.toks[i], b.pos0 + (llama_pos) i, bi, cur, {} });
                 const int n = (int) nodes.size() - 1;
                 if (cur < 0) {
-                    roots.push_back({ b.trunk, n });
+                    roots.push_back({ bi, n });
                 } else {
                     nodes[cur].kids.push_back(n);
                 }
                 cur = n;
             }
             nodes[cur].out = true;
-            n_out += new_out;
+            n_out    += new_out;
+            n_leaves += new_leaf;
             end_node.push_back(cur);
         }
         if (end == start) {
@@ -321,19 +435,26 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
 
         // one sequence per leaf; a token belongs to the sequences of all leaves below it
         std::vector<std::vector<llama_seq_id>> seqs(nodes.size());
-        std::vector<llama_seq_id> leaves;
+        std::vector<std::pair<int, llama_seq_id>> leaves; // (node, sequence)
         for (int n = 0; n < (int) nodes.size(); ++n) {
             if (!nodes[n].kids.empty()) {
                 continue;
             }
-            const llama_seq_id seq = first + (llama_seq_id) leaves.size();
-            leaves.push_back(seq);
+            const int id = (int) (std::find(busy.begin(), busy.end(), false) - busy.begin());
+            busy[id] = true;
+            const llama_seq_id seq = first + (llama_seq_id) id;
+            const base_t & bs = bases[nodes[n].base];
+            leaves.push_back({ n, seq });
             llama_memory_seq_rm(mem, seq, -1, -1);
-            llama_memory_seq_cp(mem, nodes[n].trunk, seq, -1, -1);
+            llama_memory_seq_cp(mem, bs.src, seq, -1, bs.end);
             for (int m = n; m >= 0; m = nodes[m].parent) {
                 seqs[m].push_back(seq);
             }
         }
+        auto release = [&](llama_seq_id seq) {
+            llama_memory_seq_rm(mem, seq, -1, -1);
+            busy[seq - first] = false;
+        };
         llama_batch batch = llama_batch_init((int) nodes.size(), 0, (int) leaves.size());
         for (size_t n = 0; n < nodes.size(); ++n) {
             common_batch_add(batch, nodes[n].tok, nodes[n].pos, seqs[n], nodes[n].out);
@@ -341,9 +462,16 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
         const int rc = llama_decode(ctx, batch);
         llama_batch_free(batch);
         if (rc != 0) {
-            for (llama_seq_id seq : leaves) {
-                llama_memory_seq_rm(mem, seq, -1, -1);
+            for (const auto & [n, seq] : leaves) {
+                release(seq);
             }
+            for (const auto & k : prev) {
+                release(k.seq);
+            }
+            for (const auto & k : kept) {
+                release(k.seq);
+            }
+            kept.clear();
             throw std::runtime_error(rc == 1 ? "no free KV cache space for the decision branches"
                                              : "llama_decode failed on the decision branches (" + std::to_string(rc) + ")");
         }
@@ -353,13 +481,34 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
                 result[b].push_back(logits[t]);
             }
         }
-        for (llama_seq_id seq : leaves) {
-            llama_memory_seq_rm(mem, seq, -1, -1);
+        for (const auto & [n, seq] : leaves) {
+            if ((int) kept.size() >= keep_max) {
+                release(seq);
+                continue;
+            }
+            const base_t & bs = bases[nodes[n].base];
+            tokens_t path;
+            for (int m = n; m >= 0; m = nodes[m].parent) {
+                path.push_back(nodes[m].tok);
+            }
+            path.insert(path.end(), bs.prefix.rbegin(), bs.prefix.rend());
+            std::reverse(path.begin(), path.end());
+            kept.push_back({ bs.trunk, bs.pos0, std::move(path), seq });
         }
         rows_decoded += (int) nodes.size();
         start = end;
     }
+    for (const auto & k : prev) {
+        llama_memory_seq_rm(mem, k.seq, -1, -1);
+    }
     return result;
+}
+
+void engine::drop_kept() {
+    for (const auto & k : kept) {
+        llama_memory_seq_rm(mem, k.seq, -1, -1);
+    }
+    kept.clear();
 }
 
 result engine::decide(const std::string & shared_text, const std::string & context_text,
@@ -547,27 +696,24 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         llama_synchronize(ctx); // llama_decode is asynchronous: wait for the prefill so its time isn't billed to scoring
         out.prefill_ms += ms_since(tp);
 
-        // round 1 carries every tree node and each greedy field's first step; later rounds only
-        // continue greedy fields that are still open
+        // round 1 carries every tree node (with pruning: each tree's root) and each greedy field's first
+        // step; later rounds continue greedy fields and open the tree nodes that pruning lets through
         const auto ts = std::chrono::steady_clock::now();
         std::vector<std::vector<decision_field>> state(n_group, fields);
-        bool first = true;
         while (true) {
             std::vector<branch> todo;
-            std::vector<std::pair<size_t, size_t>> owner; // (context in group, field)
+            std::vector<std::array<size_t, 3>> owner; // (context in group, field, tree node)
             for (size_t i = 0; i < n_group; ++i) {
                 const llama_seq_id trunk = seq_pool + (llama_seq_id) i;
                 const llama_pos    pos0  = pos_next[g0 + i];
                 for (size_t f = 0; f < state[i].size(); ++f) {
                     auto & fd = state[i][f];
                     if (fd.use_tree) {
-                        if (first) {
-                            for (size_t n = 0; n < fd.node_prefix.size(); ++n) {
-                                tokens_t ids = fd.suffix;
-                                ids.insert(ids.end(), fd.node_prefix[n].begin(), fd.node_prefix[n].end());
-                                todo.push_back({ trunk, pos0, ids, fd.node_options[n] });
-                                owner.push_back({ i, f });
-                            }
+                        for (int n : fd.next_nodes(opt.tree_prune)) {
+                            tokens_t ids = fd.suffix;
+                            ids.insert(ids.end(), fd.node_prefix[n].begin(), fd.node_prefix[n].end());
+                            todo.push_back({ trunk, pos0, ids, fd.node_options[n] });
+                            owner.push_back({ i, f, (size_t) n });
                         }
                     } else {
                         tokens_t opts = fd.options();
@@ -575,7 +721,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
                             tokens_t ids = fd.suffix;
                             ids.insert(ids.end(), fd.chosen.begin(), fd.chosen.end());
                             todo.push_back({ trunk, pos0, ids, opts });
-                            owner.push_back({ i, f });
+                            owner.push_back({ i, f, 0 });
                         }
                     }
                 }
@@ -585,12 +731,11 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             }
             const auto scores = score_branches(todo, seq_pool + (llama_seq_id) n_group, n_pool - (int) n_group, opt.share_tokens);
             out.rounds += 1;
-            std::vector<std::vector<std::vector<std::vector<float>>>> tree_scores(n_group, std::vector<std::vector<std::vector<float>>>(fields.size()));
             for (size_t row = 0; row < owner.size(); ++row) {
-                const auto [i, f] = owner[row];
+                const auto [i, f, n] = owner[row];
                 auto & fd = state[i][f];
                 if (fd.use_tree) {
-                    tree_scores[i][f].push_back(scores[row]);
+                    fd.set_node((int) n, scores[row]);
                 } else {
                     const auto & s    = scores[row];
                     const int    best = (int) (std::max_element(s.begin(), s.end()) - s.begin());
@@ -601,16 +746,14 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
                     fd.select(todo[row].cands[best], (float) (1.0 / denom));
                 }
             }
-            if (first) {
-                for (size_t i = 0; i < n_group; ++i) {
-                    for (size_t f = 0; f < fields.size(); ++f) {
-                        if (state[i][f].use_tree) {
-                            state[i][f].finish_tree(tree_scores[i][f]);
-                        }
-                    }
+        }
+        drop_kept();
+        for (size_t i = 0; i < n_group; ++i) {
+            for (auto & fd : state[i]) {
+                if (fd.use_tree) {
+                    fd.finish_tree();
                 }
             }
-            first = false;
         }
         for (size_t i = 0; i < n_group; ++i) {
             llama_memory_seq_rm(mem, seq_pool + (llama_seq_id) i, -1, -1);
@@ -620,9 +763,6 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             r.pos_fields     = pos_next[g0 + i];
             r.group          = n_groups;
             for (auto & fd : state[i]) {
-                if (fd.use_tree && fd.probs.empty()) {
-                    fd.finish_tree({});
-                }
                 r.fields.push_back({ fd.winner, fd.path_score, fd.scored_nodes, fd.use_tree, fd.probs });
             }
         }
@@ -681,11 +821,20 @@ field_spec make_field(const std::string & name, const std::string & type, const 
             throw std::invalid_argument("field \"" + name + "\": integer fields need integer minimum and maximum");
         }
         const long long lo = spec.at("minimum").get<long long>(), hi = spec.at("maximum").get<long long>();
-        if (hi < lo || hi - lo + 1 > 255) {
+        // optional coarser grid: step (multipleOf in JSON Schema) counted from the minimum
+        const char * step_key = json_schema ? "multipleOf" : "step";
+        long long step = 1;
+        if (spec.contains(step_key)) {
+            if (!spec.at(step_key).is_number_integer() || spec.at(step_key).get<long long>() < 1) {
+                throw std::invalid_argument("field \"" + name + "\": " + step_key + " of an integer field must be a positive integer");
+            }
+            step = spec.at(step_key).get<long long>();
+        }
+        if (hi < lo || (hi - lo) / step + 1 > 255) {
             throw std::invalid_argument("field \"" + name + "\": integer bounds must define 1-255 values");
         }
         f.type = "integer";
-        for (long long v = lo; v <= hi; ++v) {
+        for (long long v = lo; v <= hi; v += step) {
             f.values.push_back(common_json(v));
             f.encoded.push_back(std::to_string(v));
             f.numbers.push_back((double) v);
@@ -814,6 +963,11 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         cs.specs.push_back(std::move(f));
     }
 
+    const common_json compact_v = defaults.value("compact_ranges", common_json(false));
+    if (!compact_v.is_boolean()) {
+        throw std::invalid_argument("compact_ranges must be a boolean");
+    }
+    const bool compact = compact_v.get<bool>();
     std::string catalog;
     for (const auto & f : cs.specs) {
         // the value's common leading characters are fixed in the suffix; only the rest is scored
@@ -834,8 +988,19 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         cs.inputs.push_back(in);
 
         std::string allowed;
-        for (size_t i = 0; i < f.encoded.size(); ++i) {
-            allowed += (i ? ", " : "") + f.encoded[i];
+        const size_t n_num = f.numbers.size() - (f.nullable ? 1 : 0);
+        if (compact && n_num > 2) {
+            // a range instead of every value: a much shorter prefix for wide numeric fields
+            const double step = f.numbers[1] - f.numbers[0];
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.*f", decimal_places(step), step);
+            allowed = std::string(f.type == "integer" ? "integers" : "numbers") + " from " + f.encoded[0] + " to " +
+                      f.encoded[n_num - 1] + (step == 1.0 && f.type == "integer" ? "" : std::string(" in steps of ") + buf) +
+                      (f.nullable ? ", or null" : "");
+        } else {
+            for (size_t i = 0; i < f.encoded.size(); ++i) {
+                allowed += (i ? ", " : "") + f.encoded[i];
+            }
         }
         catalog += (catalog.empty() ? "" : "\n") + json_text(f.name) + (f.description.empty() ? "" : ": " + f.description) +
                    "\nAllowed values: " + allowed;

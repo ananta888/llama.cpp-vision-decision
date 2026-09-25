@@ -340,3 +340,31 @@ def test_decision_share_tokens():
             pa = [c["probability"] for c in a["fields"][name]["probs"]]
             pb = [c["probability"] for c in b["fields"][name]["probs"]]
             assert max(abs(x - y) for x, y in zip(pa, pb)) < 5e-2
+
+
+def test_decision_cpu_options():
+    global server
+    server.start()
+    size = {"type": "integer", "minimum": 100, "maximum": 199, "nullable": True, "description": "Size, null if not visible."}
+    req = {"schema": {"size": size}, "contexts": ["A small cat.", image_context([1])], "mode": "tree", "return_probs": True}
+    exact = decide(req)
+    # pruning opens only likely subtrees, in more rounds; probabilities still sum to 1
+    pruned = decide({**req, "tree_prune": 0.2})
+    assert pruned["usage"]["decoded_rows"] < exact["usage"]["decoded_rows"]
+    assert pruned["timings"]["rounds"] > exact["timings"]["rounds"]
+    for r in pruned["results"]:
+        assert abs(sum(c["probability"] for c in r["fields"]["size"]["probs"]) - 1) < 1e-4
+    assert decide({**req, "tree_prune": 0.0})["usage"]["decoded_rows"] == exact["usage"]["decoded_rows"]
+    # greedy rounds continue the paths kept from the round before
+    greedy = decide({**req, "mode": "greedy"})
+    single = decide({**req, "mode": "greedy", "share_tokens": False})
+    assert greedy["usage"]["decoded_rows"] < single["usage"]["decoded_rows"]
+    assert [r["decision"] for r in greedy["results"]] == [r["decision"] for r in single["results"]]
+    # a coarser grid and a range in the catalogue instead of every value
+    step = decide({**req, "schema": {"size": {**size, "step": 10}}, "compact_ranges": True, "trace": True})
+    assert [c["value"] for c in step["results"][0]["fields"]["size"]["probs"]] == list(range(100, 200, 10)) + [None]
+    assert "Allowed values: integers from 100 to 190 in steps of 10, or null" in step["trace"]["instructions"]
+    assert step["usage"]["prompt_tokens"] < exact["usage"]["prompt_tokens"]
+    for bad in ({"tree_prune": 1.0}, {"compact_ranges": "yes"}, {"schema": {"size": {**size, "step": 0}}}):
+        res = server.make_request("POST", "/v1/decision", data={**req, **bad})
+        assert res.status_code == 400
