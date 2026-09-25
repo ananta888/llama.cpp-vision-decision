@@ -102,7 +102,7 @@
   <div style="min-width: 240px; flex: 1 1 240px; max-width: 360px"><label for="url">Server</label><input id="url" type="text" value="http://127.0.0.1:8080"></div>
   <div style="flex: 0 1 180px"><label for="key">API key</label><input id="key" type="password" placeholder="optional" autocomplete="off"></div>
   <div style="flex: 0 1 200px"><label for="appmode">Mode</label><select id="appmode">
-    <option value="general">General</option><option value="body">Body photo check</option></select></div>
+    <option value="general">General</option><option value="body">Body photo check</option><option value="tools">Tool router</option></select></div>
 </header>
 <main>
 <section>
@@ -130,7 +130,19 @@
     <div id="liveState" class="hint" style="margin-top: 6px">Camera frames stay on this machine; live frames are not kept in the history.</div>
     <div id="liveLog" class="log" hidden></div>
   </div>
-  <label for="text">Text after the images</label>
+  <div id="toolBlock" hidden>
+    <div class="hint" style="margin-top: 10px">Tool router: a decision picks the tool and every argument with a fixed set of values
+      (enums, booleans, small integer ranges), with probabilities, in one pass. Only arguments that are free text are then written by
+      a short chat call for the chosen tool. Below the threshold the page asks back instead of calling.</div>
+    <label for="tools">Tools (OpenAI "tools" JSON)</label>
+    <textarea id="tools" spellcheck="false"></textarea>
+    <div class="hint" id="toolsState"></div>
+    <div class="row">
+      <div><label for="askBelow">Ask back below p</label><input id="askBelow" type="number" value="0.8" min="0" max="1" step="0.05"></div>
+      <div><label class="hint" style="margin-top: 22px"><input id="toolCompare" type="checkbox" checked> compare with a normal tool call</label></div>
+    </div>
+  </div>
+  <label for="text" id="textLabel">Text after the images</label>
   <input id="text" type="text" value="Answer the questions about this picture.">
   <div id="bodyInfo" class="hint" hidden style="margin-top: 10px">Body photo check: one photo of one person, head to feet. The page decides
     whether it is fit for measuring, and the model estimates sizes in cm with a p10-p90 range, or "none" where the photo does not show
@@ -303,7 +315,169 @@ function checkSchema() {
 }
 checkSchema();
 
+// ---- tool router: a decision picks the tool and its fixed-value arguments, a short chat call writes the free text ones
+const EXAMPLE_TOOLS = [
+  { type: "function", function: { name: "get_weather", description: "Current weather for a city",
+    parameters: { type: "object", properties: { city: { type: "string", description: "City name" },
+      unit: { type: "string", enum: ["celsius", "fahrenheit"], description: "Temperature unit" } }, required: ["city"] } } },
+  { type: "function", function: { name: "search_files", description: "Search files in a repository by glob",
+    parameters: { type: "object", properties: { glob: { type: "string", description: "Glob pattern, e.g. **/*.py" } }, required: ["glob"] } } },
+  { type: "function", function: { name: "create_ticket", description: "Create a support ticket",
+    parameters: { type: "object", properties: { title: { type: "string", description: "Short title" },
+      priority: { type: "string", enum: ["low", "normal", "urgent"], description: "How urgent" } }, required: ["title"] } } },
+];
+function toolList() {
+  try {
+    const t = JSON.parse($("tools").value);
+    const list = (Array.isArray(t) ? t : [t]).map((x) => x.function || x);
+    if (!list.length || list.some((f) => !f.name)) throw new Error("every tool needs a name");
+    $("toolsState").textContent = list.length + " tools"; $("toolsState").className = "hint";
+    return list;
+  } catch (e) {
+    $("toolsState").textContent = "tools are not valid: " + e.message; $("toolsState").className = "err";
+    return null;
+  }
+}
+// an argument the decision can score: enum, boolean, or an integer range of at most 255 values
+function fixedArg(a) {
+  if (Array.isArray(a.enum) && a.enum.length && a.enum.every((v) => typeof v === "string")) return { type: "enum", choices: a.enum };
+  if (a.type === "boolean") return { type: "boolean" };
+  if (a.type === "integer" && Number.isInteger(a.minimum) && Number.isInteger(a.maximum) && a.maximum - a.minimum < 255)
+    return { type: "integer", minimum: a.minimum, maximum: a.maximum };
+  return null;
+}
+function toolSchema(tools) {
+  const schema = { tool: { type: "enum", choices: tools.map((t) => t.name).concat(["none"]),
+                           description: "Which tool fits the request? none: answer directly without a tool." } };
+  const args = {}; // field name -> [tool, argument]
+  const lines = [];
+  for (const t of tools) {
+    const props = (t.parameters && t.parameters.properties) || {};
+    const parts = [];
+    for (const [a, spec] of Object.entries(props)) {
+      parts.push(a + (spec.enum ? " (" + spec.enum.join("|") + ")" : spec.type ? " (" + spec.type + ")" : ""));
+      const f = fixedArg(spec);
+      if (!f) continue;
+      const name = t.name + "__" + a;
+      schema[name] = Object.assign(f, { nullable: true,
+        description: t.name + " argument " + a + (spec.description ? ": " + spec.description : "") + "; null if the tool is not " + t.name + " or the request does not say." });
+      args[name] = [t.name, a];
+    }
+    lines.push("- " + t.name + ": " + (t.description || "") + (parts.length ? " Arguments: " + parts.join(", ") + "." : ""));
+  }
+  return { schema, args, instructions: "Available tools:\n" + lines.join("\n") };
+}
+function freeArgs(tool) {
+  const props = (tool.parameters && tool.parameters.properties) || {};
+  const req = (tool.parameters && tool.parameters.required) || [];
+  const free = {};
+  for (const [a, spec] of Object.entries(props)) if (!fixedArg(spec)) free[a] = spec;
+  return { free, required: req.filter((a) => a in free) };
+}
+async function runTools(body, runData, setStep) {
+  const tools = toolList();
+  if (!tools) throw new Error("fix the tools JSON first");
+  const ts = toolSchema(tools);
+  body.schema = ts.schema;
+  body.instructions = ts.instructions;
+  body.return_probs = true;
+  runData.request = redacted(body);
+  setStep("decision...");
+  const d = await post("/v1/decision", body);
+  runData.response = d.js; runData.round_trip_ms = d.ms;
+  const f = d.js.results[0].fields;
+  const pick = f.tool.value, p = f.tool.probability, below = parseFloat($("askBelow").value) || 0;
+  const fixed = {};
+  for (const [name, [tool, a]] of Object.entries(ts.args)) if (tool === pick && f[name] && f[name].value !== null) fixed[a] = f[name].value;
+  const tr = { pick, p, below, fixed, args: ts.args, call: null, free_ms: 0 };
+  if (pick !== "none" && p >= below) {
+    const tool = tools.find((t) => t.name === pick);
+    const { free, required } = freeArgs(tool);
+    let written = {};
+    if (Object.keys(free).length) {
+      setStep("decision done, writing free arguments...");
+      const creq = { temperature: 0, max_tokens: 256, chat_template_kwargs: { enable_thinking: false }, cache_prompt: body.cache_prompt,
+        messages: [{ role: "system", content: "You fill the arguments of the tool " + pick + " (" + (tool.description || "") + ") from the user's request. " +
+                     "Already decided: " + JSON.stringify(fixed) + ". Respond with the JSON object of the remaining arguments only." },
+                   { role: "user", content: body.contexts[0] }],
+        response_format: { type: "json_schema", json_schema: { schema: { type: "object", properties: free, required, additionalProperties: false } } } };
+      const c = await post("/v1/chat/completions", creq);
+      tr.free_request = redacted({ contexts: [creq.messages[1].content], rest: Object.assign({}, creq, { messages: undefined }), system: creq.messages[0].content });
+      tr.free_response = c.js; tr.free_ms = c.ms;
+      written = JSON.parse(c.js.choices[0].message.content);
+    }
+    tr.call = { name: pick, arguments: Object.assign({}, written, fixed) };
+  }
+  if ($("toolCompare").checked) {
+    setStep("normal tool call...");
+    const nreq = { temperature: 0, max_tokens: 256, chat_template_kwargs: { enable_thinking: false }, cache_prompt: body.cache_prompt,
+                   tools: tools.map((t) => ({ type: "function", function: t })), messages: [{ role: "user", content: body.contexts[0] }] };
+    const n = await post("/v1/chat/completions", nreq);
+    const tc = n.js.choices[0].message.tool_calls;
+    let call = null;
+    if (tc && tc.length) { try { call = { name: tc[0].function.name, arguments: JSON.parse(tc[0].function.arguments) }; } catch (e) { call = { name: tc[0].function.name, arguments: tc[0].function.arguments }; } }
+    tr.normal = { call, text: n.js.choices[0].message.content, ms: n.ms, response: n.js };
+  }
+  runData.tools = tr;
+}
+function renderTools(runData, out) {
+  const tr = runData.tools;
+  const box = el("div", { className: "decision" });
+  if (tr.pick === "none") box.textContent = "no tool: answer directly (p " + tr.p.toFixed(3) + ")";
+  else if (!tr.call) box.textContent = "ask back: " + tr.pick + " has p " + tr.p.toFixed(3) + ", below " + tr.below;
+  else box.textContent = JSON.stringify(tr.call, null, 2);
+  out.appendChild(box);
+  const t = runData.response.timings;
+  out.appendChild(el("p", { className: "hint" }, "decision " + ms(runData.round_trip_ms) + " (server " + ms(t.total_ms) + ")" +
+    (tr.free_ms ? " + free arguments " + ms(tr.free_ms) : "") + " = " + ms(runData.round_trip_ms + tr.free_ms) +
+    (tr.normal ? "; normal tool call " + ms(tr.normal.ms) : "")));
+  if (tr.normal) {
+    const nb = el("div", { className: "decision" });
+    nb.textContent = "normal tool call: " + (tr.normal.call ? JSON.stringify(tr.normal.call) : "none, answered: " + (tr.normal.text || "").slice(0, 200));
+    out.appendChild(nb);
+    const normalName = tr.normal.call ? tr.normal.call.name : "none";
+    let note, same;
+    if (tr.pick !== "none" && !tr.call) {
+      same = false;
+      note = "the router asks back; the normal tool call " + (tr.normal.call ? "called " + normalName + " anyway" : "answered without a tool");
+    } else {
+      same = normalName === tr.pick;
+      note = same ? "same tool as the normal tool call" : "the normal tool call chose " + normalName;
+    }
+    out.appendChild(el("p", { className: same ? "same" : "diff" }, note));
+  }
+  const f = runData.response.results[0].fields;
+  const tbl = el("table");
+  tbl.appendChild(rowOf(["tool", "probability"], "th"));
+  for (const c of (f.tool.probs || []).slice().sort((a, b) => b.probability - a.probability)) tbl.appendChild(rowOf([c.value, c.probability.toFixed(4)]));
+  const w1 = el("div", { className: "table-wrap" }); w1.appendChild(tbl); out.appendChild(w1);
+  const at = el("table");
+  at.appendChild(rowOf(["argument", "value", "probability"], "th"));
+  for (const [name, [tool, a]] of Object.entries(tr.args)) {
+    if (tool !== tr.pick || !f[name]) continue;
+    at.appendChild(rowOf([a, show(f[name].value), f[name].probability.toFixed(4)]));
+  }
+  if (at.rows.length > 1) { const w2 = el("div", { className: "table-wrap" }); w2.appendChild(at); out.appendChild(w2); }
+  const det = el("details"); det.appendChild(el("summary", { className: "hint" }, "requests and responses"));
+  const pre = el("pre", { className: "decision" });
+  pre.textContent = JSON.stringify({ decision_request: runData.request, decision_response: runData.response, free_arguments_request: tr.free_request,
+                                     free_arguments_response: tr.free_response, normal_tool_call: tr.normal && tr.normal.response }, null, 2);
+  det.appendChild(pre); out.appendChild(det);
+}
+
 function applyMode() {
+  const tools = $("appmode").value === "tools";
+  $("toolBlock").hidden = !tools;
+  $("textLabel").textContent = tools ? "Request (after the images, if any)" : "Text after the images";
+  if (tools) {
+    if (!$("tools").value.trim()) $("tools").value = JSON.stringify(load("dp.tools", EXAMPLE_TOOLS), null, 2);
+    if ($("text").value === "Answer the questions about this picture.") $("text").value = "Wie warm ist es gerade in Stuttgart, in Celsius?";
+    const tl = toolList();
+    if (tl) { $("schema").value = JSON.stringify(toolSchema(tl).schema, null, 2); checkSchema(); }
+    $("preset").value = "Custom";
+    $("schemaSummary").textContent = "Schema (made from the tools, open to look)";
+    $("schemaBlock").open = false;
+  }
   const body = $("appmode").value === "body";
   $("bodyInfo").hidden = !body;
   $("sizeBlock").hidden = !body;
@@ -314,18 +488,22 @@ function applyMode() {
     $("schemaBlock").open = false;
     $("schemaSummary").textContent = "Schema (fixed for this mode, open to look)";
     checkSchema();
-  } else {
+  } else if (!tools) {
     $("schemaSummary").textContent = "Schema";
     $("schemaBlock").open = true;
   }
-  $("preset").disabled = body;
-  $("schema").readOnly = body;
-  $("runas").disabled = body;
+  $("preset").disabled = body || tools;
+  $("schema").readOnly = body || tools;
+  $("runas").disabled = body || tools;
   if (body) drawCalibration(); // after the body schema is in place
   store("dp.mode", $("appmode").value);
 }
 $("appmode").value = load("dp.mode", "general");
 $("appmode").addEventListener("change", applyMode);
+$("tools").addEventListener("input", () => {
+  const tl = toolList();
+  if (tl) { $("schema").value = JSON.stringify(toolSchema(tl).schema, null, 2); checkSchema(); store("dp.tools", tl.map((f) => ({ type: "function", function: f }))); }
+});
 
 async function showModel() {
   try {
@@ -522,13 +700,16 @@ async function run(opts) {
   }
   try {
     const runData = { mode, at: new Date().toISOString(), images: lastSizes, request: redacted(body), preset: $("preset").value };
-    if (mode !== "chat") {
+    if ($("appmode").value === "tools") {
+      runData.mode = "tools";
+      await runTools(body, runData, (x) => { step = x; });
+    } else if (mode !== "chat") {
       step = "decision...";
       const d = await post("/v1/decision", body);
       runData.response = d.js;
       runData.round_trip_ms = d.ms;
     }
-    if (mode !== "decision") {
+    if (mode !== "decision" && runData.mode !== "tools") {
       step = mode === "compare" ? "decision done, chat..." : "chat...";
       const fromTrace = runData.response && runData.response.trace && runData.response.trace.instructions;
       const system = fromTrace || systemTextOf(body.schema, body.instructions, body.compact_ranges);
@@ -1237,6 +1418,7 @@ function render(runData) {
   head.appendChild(copy);
   head.appendChild(dl);
   out.appendChild(head);
+  if (runData.tools) { renderTools(runData, out); return; }
   if (runData.response && runData.chat) renderCompare(runData, out);
   if (runData.response) {
     if (runData.chat) out.appendChild(el("h2", { style: "margin-top: 16px" }, "Decision"));
