@@ -188,6 +188,7 @@
     <div><label for="numstep" title="integer fields with more than 20 values get this step (e.g. sizes in 5 cm)">Number step</label><select id="numstep">
       <option value="1">1 (every value)</option><option value="2">2</option><option value="5">5</option><option value="10">10</option></select></div>
     <div><label class="hint" style="margin-top: 22px" title="describe number fields as a range in the prompt instead of listing every value: a much shorter prompt"><input id="compact" type="checkbox"> compact ranges</label></div>
+    <div><label class="hint" style="margin-top: 22px" title="context first, questions after it: with --decision-ctx-cache the server keeps the decoded context, so new questions about the same text or images skip reading it again"><input id="ctxfirst" type="checkbox"> context first</label></div>
   </div>
   <div class="hint">For a CPU: compact ranges shorten the prompt a lot; greedy or pruning then need fewer rows. Exact tree probabilities are cheap on a GPU.</div>
   <div class="row">
@@ -580,6 +581,7 @@ async function buildRequest() {
   const prune = parseFloat($("prune").value);
   if (prune > 0) body.tree_prune = prune;
   if ($("compact").checked) body.compact_ranges = true;
+  if ($("ctxfirst").checked) body.layout = "context_first";
   const step = parseInt($("numstep").value, 10);
   if (step > 1 && !schema.properties) {
     body.schema = JSON.parse(JSON.stringify(schema));
@@ -646,7 +648,21 @@ function systemTextOf(schema, instructions, compact) {
 }
 function chatRequest(body, system) {
   // the same system and user message as the decision; only the way the answer is made differs
-  return { messages: [{ role: "system", content: system }, { role: "user", content: body.contexts[0] }], temperature: 0,
+  let user = body.contexts[0];
+  if (body.layout === "context_first") {
+    // system holds only the task; the field list follows the context in the user message
+    const full = systemTextOf(body.schema, body.instructions, body.compact_ranges);
+    const at = full.indexOf("\n\nFields:\n");
+    system = full.slice(0, at);
+    const fields = full.slice(at);
+    if (typeof user === "string") user = user + fields;
+    else {
+      // append to the last text part: a separate part would be joined with an extra newline
+      const last = user[user.length - 1];
+      user = last && last.type === "text" ? user.slice(0, -1).concat([{ type: "text", text: last.text + fields }]) : user.concat([{ type: "text", text: fields }]);
+    }
+  }
+  return { messages: [{ role: "system", content: system }, { role: "user", content: user }], temperature: 0,
            max_tokens: 64 + 32 * Object.keys(body.schema).length, logprobs: true, top_logprobs: 5,
            response_format: { type: "json_schema", json_schema: { schema: jsonSchemaOf(body.schema) } },
            chat_template_kwargs: { enable_thinking: false }, cache_prompt: body.cache_prompt };
@@ -715,10 +731,10 @@ async function run(opts) {
       const system = fromTrace || systemTextOf(body.schema, body.instructions, body.compact_ranges);
       const creq = chatRequest(body, system);
       const c = await post("/v1/chat/completions", creq);
-      runData.chat = { request: redacted({ contexts: [creq.messages[1].content], rest: Object.assign({}, creq, { messages: undefined }), system }),
+      runData.chat = { request: redacted({ contexts: [creq.messages[1].content], rest: Object.assign({}, creq, { messages: undefined }), system: creq.messages[0].content }),
                        response: c.js, round_trip_ms: c.ms, system_from: fromTrace ? "decision trace" : "rebuilt in the page" };
       try {
-        const tpl = await post("/apply-template", { messages: [{ role: "system", content: system }, { role: "user", content: userTextOf(body.contexts[0]) }],
+        const tpl = await post("/apply-template", { messages: [{ role: "system", content: creq.messages[0].content }, { role: "user", content: userTextOf(creq.messages[1].content) }],
                                                      chat_template_kwargs: { enable_thinking: false } });
         runData.chat.prompt = tpl.js.prompt;
       } catch (e) { runData.chat.prompt = null; }
@@ -1215,7 +1231,8 @@ function renderDecision(runData, out) {
     const lines = [
       (runData.images && runData.images.length ? "Images sent: " + runData.images.join(", ") + ". " : "") + "Instructions and field list: " + tr.prefix_tokens + " tokens, " + (tr.prefix_cached ? "reused from the cache" : "decoded") + ".",
       imgs.length ? imgs.length + " image" + (imgs.length > 1 ? "s" : "") + " encoded by the vision projector: " + imgs.map((c) => c.tokens + " tokens on " + c.positions + " positions" + (c.cached ? " (cached embedding)" : "")).join(", ") + "." : "No image in this context.",
-      "Context decoded into its own KV sequence from position " + ct.position_start + ": " + ct.chunks.map((c) => c.type + " " + c.tokens).join(" + ") + " tokens.",
+      (ct.context_cached ? "Context taken from the context cache (decoded by an earlier request, nothing decoded now): " : "Context decoded into its own KV sequence from position " + ct.position_start + ": ") +
+        ct.chunks.map((c) => c.type + " " + c.tokens).join(" + ") + " tokens" + (tr.layout === "context_first" ? "; the field list follows it (layout context first)" : "") + ".",
       "All " + tr.fields.length + " fields branch off that sequence at position " + ct.position_fields + " and are scored together (" + res.timings.rounds + " round" + (res.timings.rounds > 1 ? "s" : "") + ", " + res.usage.scored_rows + " rows" + (res.usage.decoded_rows != null ? " (" + res.usage.decoded_rows + " decoded)" : "") + ", mode " + tr.mode + ").",
       "The JSON is assembled from the scores, so it always matches the schema."
     ];
@@ -1351,7 +1368,7 @@ function renderSideBySide(runData, out) {
   grid.appendChild(el("div", { className: "head" }, "Chat with json_schema (old)"));
 
   // in: the rendered prompts
-  const decisionPrompt = tr.prompt_prefix + ct.prompt;
+  const decisionPrompt = tr.prompt_prefix + ct.prompt + (tr.context_tail || ""); // context first: the field list follows the context
   const fieldLines = tr.fields.map((f) => "\n  " + JSON.stringify(f.name) + ": <" + (f.values || f.candidates).join(" | ") + ">").join("");
   row("In: prompt", promptPre(decisionPrompt, fieldLines + "\n  (each line scored on its own branch)"),
       chat.prompt ? promptPre(chat.prompt, "<- the model writes from here") : "the template could not be rendered");
@@ -1368,7 +1385,7 @@ function renderSideBySide(runData, out) {
   // work
   const imgs = ct.chunks.filter((c) => c.type === "image");
   row("Work",
-      "prefill " + tr.prefix_tokens + " prefix tokens" + (tr.prefix_cached ? " (cached)" : "") + " + " + r.usage.context_tokens + " context tokens" +
+      "prefill " + tr.prefix_tokens + " prefix tokens" + (tr.prefix_cached ? " (cached)" : "") + " + " + r.usage.context_tokens + " context tokens" + (ct.context_cached ? " (from the context cache)" : "") +
       (imgs.length ? " (" + imgs.map((c) => c.tokens + " image tokens on " + c.positions + " positions" + (c.cached ? ", cached" : "")).join("; ") + ")" : "") +
       "; then " + tr.fields.length + " fields scored from position " + ct.position_fields + " in " + res.timings.rounds + " round(s), " + res.usage.scored_rows + " rows" + (res.usage.decoded_rows != null ? " (" + res.usage.decoded_rows + " decoded)" : "") + "",
       "prompt " + (t.prompt_n || 0) + " tokens" + (t.cache_n ? " (+" + t.cache_n + " cached)" : "") + "; then " + (t.predicted_n || 0) + " tokens generated one after another");
