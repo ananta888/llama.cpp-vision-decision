@@ -45,6 +45,7 @@ struct options {
     size_t      tree_max       = 128;
     bool        split_boundary = false;  // legacy: tokenise suffix and values separately
     bool        allow_cache    = true;   // reuse the cached static prefix when it matches
+    bool        share_tokens   = true;   // decode tokens that branches have in common once (a trie)
 };
 
 struct field_result {
@@ -126,7 +127,7 @@ class engine {
     void     decode_parts(const std::vector<prompt_part> & parts);
     bool     prepare_prefix(const tokens_t & shared, bool allow_cache);
     void     clear_pool();
-    std::vector<std::vector<float>> score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free);
+    std::vector<std::vector<float>> score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free, bool share);
 };
 
 // ---- schema compiler (the C++ counterpart of llama-mojo's tools/prepare_decisions.py)

@@ -187,6 +187,7 @@
     <button id="run">Decide</button>
     <label class="hint" style="margin: 0"><input id="trace" type="checkbox" checked> trace</label>
     <label class="hint" style="margin: 0"><input id="cache" type="checkbox" checked> use cache</label>
+    <label class="hint" style="margin: 0" title="decode tokens the branches have in common once (a trie)"><input id="share" type="checkbox" checked> share tokens</label>
     <span class="hint">Ctrl+Enter</span>
   </div>
   <div class="actions" style="margin-top: 18px"><h2 style="margin: 0 auto 0 0">History</h2><button class="ghost" id="clearHistory">clear history</button></div>
@@ -388,7 +389,7 @@ async function buildRequest() {
   const parts = sent.map((x) => ({ type: "image_url", image_url: { url: x.url } }));
   if ($("text").value) parts.push({ type: "text", text: $("text").value });
   const body = { schema, contexts: [parts.length ? parts : ($("text").value || " ")], mode: $("mode").value,
-                 temperature: parseFloat($("temp").value) || 1, return_probs: true, trace: $("trace").checked, cache_prompt: $("cache").checked };
+                 temperature: parseFloat($("temp").value) || 1, return_probs: true, trace: $("trace").checked, cache_prompt: $("cache").checked, share_tokens: $("share").checked };
   const minp = parseFloat($("minp").value), minm = parseFloat($("minm").value);
   if (minp > 0 || minm > 0) body.abstain = { min_probability: minp || 0, min_margin: minm || 0 };
   return body;
@@ -1012,7 +1013,7 @@ function renderDecision(runData, out) {
       (runData.images && runData.images.length ? "Images sent: " + runData.images.join(", ") + ". " : "") + "Instructions and field list: " + tr.prefix_tokens + " tokens, " + (tr.prefix_cached ? "reused from the cache" : "decoded") + ".",
       imgs.length ? imgs.length + " image" + (imgs.length > 1 ? "s" : "") + " encoded by the vision projector: " + imgs.map((c) => c.tokens + " tokens on " + c.positions + " positions" + (c.cached ? " (cached embedding)" : "")).join(", ") + "." : "No image in this context.",
       "Context decoded into its own KV sequence from position " + ct.position_start + ": " + ct.chunks.map((c) => c.type + " " + c.tokens).join(" + ") + " tokens.",
-      "All " + tr.fields.length + " fields branch off that sequence at position " + ct.position_fields + " and are scored together (" + res.timings.rounds + " round" + (res.timings.rounds > 1 ? "s" : "") + ", " + res.usage.scored_rows + " rows, mode " + tr.mode + ").",
+      "All " + tr.fields.length + " fields branch off that sequence at position " + ct.position_fields + " and are scored together (" + res.timings.rounds + " round" + (res.timings.rounds > 1 ? "s" : "") + ", " + res.usage.scored_rows + " rows" + (res.usage.decoded_rows != null ? " (" + res.usage.decoded_rows + " decoded)" : "") + ", mode " + tr.mode + ").",
       "The JSON is assembled from the scores, so it always matches the schema."
     ];
     for (const l of lines) ol.appendChild(el("li", {}, l));
@@ -1166,7 +1167,7 @@ function renderSideBySide(runData, out) {
   row("Work",
       "prefill " + tr.prefix_tokens + " prefix tokens" + (tr.prefix_cached ? " (cached)" : "") + " + " + r.usage.context_tokens + " context tokens" +
       (imgs.length ? " (" + imgs.map((c) => c.tokens + " image tokens on " + c.positions + " positions" + (c.cached ? ", cached" : "")).join("; ") + ")" : "") +
-      "; then " + tr.fields.length + " fields scored from position " + ct.position_fields + " in " + res.timings.rounds + " round(s), " + res.usage.scored_rows + " rows",
+      "; then " + tr.fields.length + " fields scored from position " + ct.position_fields + " in " + res.timings.rounds + " round(s), " + res.usage.scored_rows + " rows" + (res.usage.decoded_rows != null ? " (" + res.usage.decoded_rows + " decoded)" : "") + "",
       "prompt " + (t.prompt_n || 0) + " tokens" + (t.cache_n ? " (+" + t.cache_n + " cached)" : "") + "; then " + (t.predicted_n || 0) + " tokens generated one after another");
 
   // out

@@ -127,6 +127,7 @@ Every field also takes `temperature` and `abstain` (`x-temperature` / `x-abstain
 | `mode` | `auto` | `tree` scores every divergence node and returns exact probabilities; `greedy` walks the trie; `auto` picks tree up to `tree_max` values |
 | `tree_max` | 128 | per-field switch between tree and greedy |
 | `cache_prompt` | true | reuse the cached instructions + schema prefix |
+| `share_tokens` | true | decode tokens that branches have in common (field suffix, leading digits) once; `false` gives every branch its own copy, as before |
 | `temperature` | 1.0 | default temperature of every field |
 | `abstain` | none | default `{"min_probability": p, "min_margin": m}` of every field |
 | `return_probs` | false | list every allowed value of a tree field with its probability |

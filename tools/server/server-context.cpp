@@ -2591,6 +2591,7 @@ private:
         opt.mode        = body.value("mode", std::string("auto"));
         opt.tree_max    = (size_t) body.value("tree_max", 128);
         opt.allow_cache = body.value("cache_prompt", true);
+        opt.share_tokens = body.value("share_tokens", true);
 
         // contexts with media are split into chunks by libmtmd and prefilled on their trunk by the engine
         decision_media.max_bytes = (size_t) params_base.decision_media_cache * 1024 * 1024;
@@ -2728,7 +2729,7 @@ private:
                                         { "position_fields", r.pos_fields }, { "group", r.group } };
             }
             trace = { { "instructions", cs.system_text }, { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
-                      { "mode", opt.mode }, { "groups", n_groups }, { "fields", fields } };
+                      { "mode", opt.mode }, { "share_tokens", opt.share_tokens }, { "groups", n_groups }, { "fields", fields } };
         }
         json out = json::object();
         out["object"]  = "decision";

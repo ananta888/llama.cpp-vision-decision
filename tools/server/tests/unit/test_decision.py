@@ -319,3 +319,24 @@ def test_decision_nullable_fields():
     r = decide({"schema": js, "contexts": ["A face seen from very close."], "return_probs": True})["results"][0]
     assert [c["value"] for c in r["fields"]["view"]["probs"]] == ["front", "side", None]
     assert r["fields"]["hip_cm"]["probs"][-1]["value"] is None
+
+
+def test_decision_share_tokens():
+    global server
+    server.start()
+    schema = {
+        "size": {"type": "integer", "minimum": 100, "maximum": 199, "nullable": True, "description": "Size, null if not visible."},
+        "label": SCHEMA["label"],
+    }
+    req = {"schema": schema, "contexts": ["A small cat.", image_context([1])], "mode": "tree", "return_probs": True}
+    shared = decide(req)
+    single = decide({**req, "share_tokens": False})
+    assert shared["usage"]["scored_rows"] == single["usage"]["scored_rows"]
+    assert shared["usage"]["decoded_rows"] < shared["usage"]["scored_rows"]
+    assert single["usage"]["decoded_rows"] == single["usage"]["scored_rows"]
+    # same branches, only the batch shape differs: probabilities agree up to backend numerics
+    for a, b in zip(shared["results"], single["results"]):
+        for name in schema:
+            pa = [c["probability"] for c in a["fields"][name]["probs"]]
+            pb = [c["probability"] for c in b["fields"][name]["probs"]]
+            assert max(abs(x - y) for x, y in zip(pa, pb)) < 5e-2

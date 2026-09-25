@@ -251,7 +251,7 @@ void engine::clear_pool() {
 // digits of numbers) share them: the branches form a trie, each trie token is decoded once and
 // belongs to every sequence below it, with one sequence per trie leaf. Groups are bounded by free
 // sequences (outputs) and batch rows.
-std::vector<std::vector<float>> engine::score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free) {
+std::vector<std::vector<float>> engine::score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free, bool share) {
     struct node {
         llama_token      tok;
         llama_pos        pos;
@@ -271,10 +271,10 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
         size_t end = start;
         for (; end < branches.size(); ++end) {
             const branch & b = branches[end];
-            // follow the tokens that are already in the trie
+            // follow the tokens that are already in the trie; without sharing every branch is its own path
             int cur = -1;
             size_t i = 0;
-            for (; i < b.toks.size(); ++i) {
+            for (; share && i < b.toks.size(); ++i) {
                 int next = -1;
                 if (cur < 0) {
                     for (const auto & [t, n] : roots) {
@@ -583,7 +583,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             if (todo.empty()) {
                 break;
             }
-            const auto scores = score_branches(todo, seq_pool + (llama_seq_id) n_group, n_pool - (int) n_group);
+            const auto scores = score_branches(todo, seq_pool + (llama_seq_id) n_group, n_pool - (int) n_group, opt.share_tokens);
             out.rounds += 1;
             std::vector<std::vector<std::vector<std::vector<float>>>> tree_scores(n_group, std::vector<std::vector<std::vector<float>>>(fields.size()));
             for (size_t row = 0; row < owner.size(); ++row) {
