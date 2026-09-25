@@ -386,6 +386,27 @@ measures latency.
 `llama-parallel-decision` runs the same engine from a worker process (stdin/stdout protocol, one JSON request per
 line). Environment: `DECIDE_TREE`, `DECIDE_TREE_MAX`, `DECIDE_NSEQ`, `DECIDE_SPLIT_BOUNDARY`.
 
+## Tool calls
+
+A decision can route tool calls: which tool (or none), and every argument with a fixed set of values (enums, booleans,
+small integer ranges), each with a probability, in one pass. Arguments that are free text (a city, a title, a glob)
+cannot be scored; a short chat call with a `json_schema` response writes only those, for the chosen tool. Below a
+probability threshold the caller asks back instead of calling. The playground's "Tool router" mode does exactly this
+from an OpenAI `tools` list, and can run the normal tool call next to it.
+
+Bonsai 2 27B (hybrid, CUDA), three example tools (`get_weather`, `search_files`, `create_ticket`):
+
+| request | router | normal tool call |
+|---|---|---|
+| weather in Stuttgart in Celsius | `get_weather` p 1.00, unit celsius; city written: 0.74 + 1.31 s | same call, 2.24 s |
+| production server down, ticket now | `create_ticket` p 1.00, priority urgent; title written: 0.27 + 1.85 s | same tool, 2.74 s |
+| what is 17 times 23 | none, answer directly: 0.27 s | none, 0.75 s |
+| find the Markdown files in docs | `search_files`; glob `docs/**/*.md`: 0.26 + 1.60 s | same call, 2.20 s |
+| "how is the weather?" (no place) | `get_weather` p 0.72 < 0.8: asks back, 0.47 s | `get_weather` with the invented city "Berlin", 1.32 s |
+
+The router is fastest when no free text is needed (no tool, fixed-value tools, asking back), and it knows when it is
+unsure; with free text it is about as fast as the normal call.
+
 ## A UI for it
 
 [decision-playground](https://github.com/thecodacus/decision-playground) is a browser-only playground: it talks
