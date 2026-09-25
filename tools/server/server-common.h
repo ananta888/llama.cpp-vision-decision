@@ -312,6 +312,9 @@ struct server_chat_params {
     bool force_pure_content = false;
 };
 
+// load one media url (http(s), file:// under media_path, data: uri or raw base64) into out_files
+void handle_media(std::vector<raw_buffer> & out_files, const std::string & url, const std::string & media_path, bool accept_base64_uri);
+
 // used by /completions endpoint
 json oaicompat_completion_params_parse(const json & body);
 

@@ -1,0 +1,1292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vision Decisions</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --fg: #1c1c1e; --muted: #6a6a70; --card: #ffffff; --line: #deded8; --soft: #efefea;
+    --accent: #2f6fdb; --accent-fg: #ffffff; --warn: #b4460a; --ok: #1f7a3d;
+    --seg1: #7c5cd6; --seg2: #2f6fdb; --seg3: #1f9e8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #131316; --fg: #ececef; --muted: #9a9aa3; --card: #1c1c20; --line: #313138; --soft: #25252b;
+            --accent: #6ea0ff; --accent-fg: #0e1320; --warn: #fb923c; --ok: #4ade80;
+            --seg1: #a78bfa; --seg2: #6ea0ff; --seg3: #34d399; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+  header, main { max-width: 1240px; margin: 0 auto; padding: 0 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding-top: 16px; }
+  header h1 { font-size: 18px; margin: 0 auto 4px 0; }
+  header .model { color: var(--muted); font-size: 12px; }
+  main { display: grid; gap: 16px; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); padding-top: 12px; padding-bottom: 32px; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 4px 0 8px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  input[type=text], input[type=number], input[type=password], select, textarea {
+    width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 170px; resize: vertical; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+  button { background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; padding: 8px 16px; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 4px 10px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #drop { border: 2px dashed var(--line); border-radius: 8px; padding: 14px; text-align: center; color: var(--muted); cursor: pointer; }
+  #drop.over { border-color: var(--accent); color: var(--accent); }
+  #thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .thumb { position: relative; }
+  .thumb img { width: 96px; height: 96px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
+  .thumb button { position: absolute; top: 2px; right: 2px; padding: 0 6px; font-size: 12px; line-height: 18px; }
+  .decision { font-family: ui-monospace, monospace; font-size: 13px; background: var(--soft); border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-word; }
+  .field { margin: 12px 0; }
+  .field h3 { font-size: 14px; margin: 0 0 4px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .field h3 .meta { color: var(--muted); font-weight: normal; font-size: 12px; }
+  .badge { font-size: 11px; border-radius: 4px; padding: 1px 6px; }
+  .badge.abstain { color: var(--warn); border: 1px solid var(--warn); }
+  .badge.ok { color: var(--ok); border: 1px solid var(--ok); }
+  .bar { display: grid; grid-template-columns: minmax(60px, 140px) minmax(0, 1fr) 56px; gap: 6px; align-items: center; font-size: 12px; }
+  .bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track { background: var(--soft); border-radius: 3px; height: 10px; overflow: hidden; }
+  .fill { background: var(--accent); height: 100%; }
+  .bar.win span:first-child { font-weight: 600; }
+  .timeline { display: flex; height: 16px; border-radius: 4px; overflow: hidden; background: var(--soft); margin: 6px 0; }
+  .timeline div { height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  details { border-top: 1px solid var(--line); padding: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; margin: 8px 0 0; background: var(--soft); border-radius: 6px; padding: 8px; max-height: 360px; overflow: auto; }
+  pre .img { color: var(--seg1); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 8px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: normal; }
+  td code { font-size: 12px; }
+  .table-wrap { overflow-x: auto; }
+  .err { color: var(--warn); white-space: pre-wrap; }
+  #history { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  #history button { background: var(--soft); color: var(--fg); padding: 4px; border: 1px solid var(--line); flex: 0 0 auto; text-align: left; font-size: 11px; width: 120px; }
+  #history img { width: 100%; height: 56px; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 2px; }
+  .same { color: var(--ok); } .diff { color: var(--warn); font-weight: 600; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .cols > div { background: var(--soft); border-radius: 6px; padding: 8px; min-width: 0; }
+  .cols h3 { font-size: 13px; margin: 0 0 4px; }
+  .big { font-size: 20px; font-weight: 600; }
+  .tok { font-family: ui-monospace, monospace; white-space: pre; }
+  .side { display: grid; grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: start; margin-top: 8px; }
+  .side > .lab { color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 8px; }
+  .side > .cell { background: var(--soft); border-radius: 6px; padding: 8px; min-width: 0; font-size: 12px; }
+  .side > .cell pre { margin: 0; padding: 0; background: none; max-height: 300px; }
+  .side > .head { font-weight: 600; font-size: 13px; }
+  @media (max-width: 700px) { .side { grid-template-columns: minmax(0, 1fr); } .side > .lab { padding-top: 12px; } }
+  .check { font-size: 12px; margin-top: 8px; }
+  #cam { width: 100%; max-height: 320px; background: #000; border-radius: 6px; display: block; }
+  .log { font-family: ui-monospace, monospace; font-size: 11px; background: var(--soft); border-radius: 6px; padding: 6px 8px;
+         max-height: 220px; overflow: auto; margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+  .log .bad { color: var(--warn); } .log .good { color: var(--ok); }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 4px; }
+  #liveView table td { vertical-align: middle; }
+  #liveView .fill { transition: width .35s ease; }
+  #liveView .val { font-family: ui-monospace, monospace; transition: background-color .6s ease; border-radius: 3px; padding: 0 3px; }
+  #liveView .val.flash { background-color: var(--seg1); color: var(--accent-fg); transition: none; }
+  #liveView .busy { visibility: hidden; } #liveView .busy.on { visibility: visible; }
+  #liveView .track { min-width: 80px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vision Decisions <span class="model" id="model"></span></h1>
+  <div style="min-width: 240px; flex: 1 1 240px; max-width: 360px"><label for="url">Server</label><input id="url" type="text" value="http://127.0.0.1:8080"></div>
+  <div style="flex: 0 1 180px"><label for="key">API key</label><input id="key" type="password" placeholder="optional" autocomplete="off"></div>
+  <div style="flex: 0 1 200px"><label for="appmode">Mode</label><select id="appmode">
+    <option value="general">General</option><option value="body">Body photo check</option></select></div>
+</header>
+<main>
+<section>
+  <h2>Input</h2>
+  <div class="row">
+    <div><label for="source">Source</label><select id="source"><option value="images">Images</option><option value="webcam">Webcam</option></select></div>
+  </div>
+  <div id="imageBlock">
+    <div id="drop" tabindex="0" style="margin-top: 10px">Drop images here, paste them, or click to choose<input id="files" type="file" accept="image/*" multiple hidden></div>
+    <div id="thumbs"></div>
+  </div>
+  <div id="camBlock" hidden>
+    <video id="cam" autoplay playsinline muted style="margin-top: 10px"></video>
+    <div class="row">
+      <div><label for="camera">Camera</label><select id="camera"><option value="">default</option></select></div>
+      <div><label for="interval">Every</label><select id="interval">
+        <option value="0">manual</option><option value="1000">1 s</option><option value="2000" selected>2 s</option>
+        <option value="5000">5 s</option><option value="10000">10 s</option><option value="30000">30 s</option></select></div>
+    </div>
+    <div class="actions">
+      <button id="camStart" class="ghost">start camera</button>
+      <button id="liveStart" disabled>start live</button>
+      <button id="snap" class="ghost" disabled>analyse one frame</button>
+    </div>
+    <div id="liveState" class="hint" style="margin-top: 6px">Camera frames stay on this machine; live frames are not kept in the history.</div>
+    <div id="liveLog" class="log" hidden></div>
+  </div>
+  <label for="text">Text after the images</label>
+  <input id="text" type="text" value="Answer the questions about this picture.">
+  <div id="bodyInfo" class="hint" hidden style="margin-top: 10px">Body photo check: one photo of one person, head to feet. The page decides
+    whether it is fit for measuring, and the model estimates sizes in cm with a p10-p90 range, or "none" where the photo does not show
+    them. These are model estimates, not measurements: a single photo has no scale, so treat them as rough until calibrated on
+    measured people.</div>
+  <div id="sizeBlock" hidden>
+    <div class="row">
+      <div><label for="correction">Size correction</label><select id="correction">
+        <option value="none">none (raw estimates)</option><option value="height">scale by known body height</option>
+        <option value="samples">calibration from my measurements</option></select></div>
+      <div><label for="knownHeight">Known body height (cm)</label><input id="knownHeight" type="number" min="100" max="230" step="1" placeholder="e.g. 178"></div>
+    </div>
+    <details id="calBlock" style="margin-top: 8px">
+      <summary class="hint">Calibration from my measurements (<span id="calCount">0</span> samples)</summary>
+      <div class="hint" style="margin-top: 6px">Measure a person with a tape, take the photo, press Decide, then enter the true sizes and add the
+        sample. Only the model output and your numbers are kept (in this browser, and in the export), never the photo.</div>
+      <div id="truthForm" class="row"></div>
+      <div class="actions">
+        <button class="ghost" id="calAdd">add sample from the current result</button>
+        <button class="ghost" id="calExport">export</button>
+        <button class="ghost" id="calImportBtn">import</button><input id="calImport" type="file" accept=".json,application/json" hidden>
+        <button class="ghost" id="calClear">clear samples</button>
+      </div>
+      <div id="calMsg" class="hint"></div>
+      <div class="table-wrap"><table id="calTable"></table></div>
+    </details>
+  </div>
+  <details id="schemaBlock" open>
+  <summary class="hint" id="schemaSummary" style="margin-top: 10px">Schema</summary>
+  <label for="preset">Schema</label>
+  <select id="preset"></select>
+  <textarea id="schema" spellcheck="false" style="margin-top: 6px"></textarea>
+  <div class="hint" id="schemaState"></div>
+  </details>
+  <div class="row">
+    <div><label for="mode">Scoring</label><select id="mode"><option>auto</option><option>tree</option><option>greedy</option></select></div>
+    <div><label for="temp">Temperature</label><input id="temp" type="number" value="1" min="0.25" max="10" step="0.05"></div>
+    <div><label for="minp">Abstain below p</label><input id="minp" type="number" value="0" min="0" max="1" step="0.05"></div>
+    <div><label for="minm">Abstain below margin</label><input id="minm" type="number" value="0" min="0" max="1" step="0.05"></div>
+  </div>
+  <div class="row">
+    <div><label for="prune" title="tree fields: open a digit subtree only when it is reached with at least this probability (more rounds, fewer rows)">Prune below p</label><input id="prune" type="number" value="0" min="0" max="0.5" step="0.01"></div>
+    <div><label for="numstep" title="integer fields with more than 20 values get this step (e.g. sizes in 5 cm)">Number step</label><select id="numstep">
+      <option value="1">1 (every value)</option><option value="2">2</option><option value="5">5</option><option value="10">10</option></select></div>
+    <div><label class="hint" style="margin-top: 22px" title="describe number fields as a range in the prompt instead of listing every value: a much shorter prompt"><input id="compact" type="checkbox"> compact ranges</label></div>
+  </div>
+  <div class="hint">For a CPU: compact ranges shorten the prompt a lot; greedy or pruning then need fewer rows. Exact tree probabilities are cheap on a GPU.</div>
+  <div class="row">
+    <div><label for="maxside">Max image size</label><select id="maxside">
+      <option value="512">512 px</option><option value="768">768 px</option><option value="1024" selected>1024 px</option>
+      <option value="1536">1536 px</option><option value="0">original</option></select></div>
+  </div>
+  <div class="hint">Images are scaled down in the browser before sending. Big photos cost many image tokens and take minutes on a CPU.</div>
+  <div class="row">
+    <div><label for="runas">Run as</label><select id="runas">
+      <option value="decision">Decision (/v1/decision)</option>
+      <option value="chat">Chat with json_schema</option>
+      <option value="compare">Compare both</option></select></div>
+  </div>
+  <div class="actions">
+    <button id="run">Decide</button>
+    <label class="hint" style="margin: 0"><input id="trace" type="checkbox" checked> trace</label>
+    <label class="hint" style="margin: 0"><input id="cache" type="checkbox" checked> use cache</label>
+    <label class="hint" style="margin: 0" title="decode tokens the branches have in common once (a trie)"><input id="share" type="checkbox" checked> share tokens</label>
+    <span class="hint">Ctrl+Enter</span>
+  </div>
+  <div class="actions" style="margin-top: 18px"><h2 style="margin: 0 auto 0 0">History</h2><button class="ghost" id="clearHistory">clear history</button></div>
+  <div id="history"><span class="hint">Runs of this browser show up here.</span></div>
+</section>
+<section id="out">
+  <h2>Result</h2>
+  <p class="hint">Pick an image and press Decide. Every value of every field comes back with its probability; the trace shows what the server did with the request.</p>
+</section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const PRESETS = {
+  "Photo": {
+    person_visible: { type: "boolean", description: "Is a person visible?" },
+    people: { type: "integer", minimum: 0, maximum: 5, description: "How many people are visible?" },
+    setting: { type: "enum", choices: ["indoor", "outdoor", "unknown"], description: "Where was the photo taken?" },
+    main_subject: { type: "enum", choices: ["person", "animal", "vehicle", "building", "landscape", "object", "text", "unknown"], description: "What is the main subject?" },
+    lighting: { type: "enum", choices: ["bright", "normal", "dark"], description: "How is the lighting?" }
+  },
+  "Shapes (bench/shapes.py)": {
+    shape: { type: "enum", choices: ["circle", "square", "triangle", "unknown"], description: "Which shape is drawn? unknown if there is no shape." },
+    color: { type: "enum", choices: ["red", "green", "blue", "yellow", "unknown"], description: "What colour are the shapes? unknown if there is no shape." },
+    count: { type: "integer", minimum: 0, maximum: 4, description: "How many shapes are there?" },
+    dark_background: { type: "boolean", description: "Is the background dark?" }
+  },
+  "Body photo check": {
+    person_count: { type: "integer", minimum: 0, maximum: 3, description: "How many people are visible?", abstain: { min_probability: 0.8 } },
+    full_body_visible: { type: "boolean", description: "Is the whole person visible from head to feet?", abstain: { min_probability: 0.8 } },
+    view: { type: "enum", choices: ["front", "side", "back", "angled", "no_person"], description: "From which side is the person photographed?", abstain: { min_probability: 0.8 } },
+    standing_straight: { type: "boolean", description: "Is the person standing straight and upright?", abstain: { min_probability: 0.8 } },
+    arms_away: { type: "boolean", description: "Are the arms held slightly away from the body?" },
+    clothing: { type: "enum", choices: ["tight", "normal", "loose", "no_person"], description: "How close-fitting is the clothing?" },
+    reference_object: { type: "enum", choices: ["a4_paper", "door_frame", "credit_card", "other", "none"], description: "Is an object of known size visible next to the person?" },
+    sharp: { type: "boolean", description: "Is the image sharp and not blurry?", abstain: { min_probability: 0.8 } },
+    lighting: { type: "enum", choices: ["good", "dim", "backlit", "harsh"], description: "How is the lighting on the person?" },
+    distorted: { type: "boolean", description: "Is the body distorted by a wide-angle lens or a camera held too close?", abstain: { min_probability: 0.8 } },
+    height_cm: { type: "integer", minimum: 140, maximum: 210, nullable: true, aggregate: "median", description: "Estimated body height in cm; null if head or feet are not visible." },
+    shoulder_width_cm: { type: "integer", minimum: 30, maximum: 60, nullable: true, aggregate: "median", description: "Estimated shoulder width in cm; null if the shoulders are not visible." },
+    chest_cm: { type: "integer", minimum: 70, maximum: 150, nullable: true, aggregate: "median", description: "Estimated chest circumference in cm; null if the chest is not visible." },
+    waist_cm: { type: "integer", minimum: 55, maximum: 150, nullable: true, aggregate: "median", description: "Estimated waist circumference in cm; null if the waist is not visible." },
+    hip_cm: { type: "integer", minimum: 70, maximum: 150, nullable: true, aggregate: "median", description: "Estimated hip circumference in cm; null if the hips are not visible." },
+    inseam_cm: { type: "integer", minimum: 60, maximum: 100, nullable: true, aggregate: "median", description: "Estimated inseam (inner leg length) in cm; null if the legs are not fully visible." },
+    arm_length_cm: { type: "integer", minimum: 45, maximum: 75, nullable: true, aggregate: "median", description: "Estimated arm length from shoulder to wrist in cm; null if an arm is not fully visible." }
+  },
+  "Document": {
+    is_document: { type: "boolean", description: "Is this a photo or scan of a document?" },
+    kind: { type: "enum", choices: ["invoice", "letter", "form", "receipt", "id_card", "other", "none"], description: "What kind of document is it?" },
+    readable: { type: "enum", choices: ["good", "partly", "no"], description: "How readable is the text?" },
+    handwriting: { type: "boolean", description: "Does it contain handwriting?" }
+  }
+};
+// preset checks that turn the fields into one verdict; a field listed here must match and must not abstain
+const GATES = {
+  "Body photo check": {
+    title: "Photo suitable for measuring",
+    rules: { person_count: [1], full_body_visible: [true], view: ["front", "side"], standing_straight: [true], sharp: [true], distorted: [false] },
+    hints: { reference_object: ["none"], clothing: ["loose"], arms_away: [false] },
+    hint_text: { reference_object: "no reference object: the scale must come from a known body height",
+                 clothing: "loose clothing hides the body outline", arms_away: "arms against the body hide the waist" }
+  }
+};
+let images = [];
+let last = null;
+let lastSizes = [];
+
+function el(tag, attrs, text) {
+  const n = document.createElement(tag);
+  Object.assign(n, attrs || {});
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+function store(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage off */ } }
+function load(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
+function show(v) { return v === null ? "none" : JSON.stringify(v); }
+function range(f) { return f.interval_p10_p90 ? " (" + f.interval_p10_p90.map(show).join("-") + ")" : ""; }
+function ms(v) { return v >= 1000 ? (v / 1000).toFixed(2) + " s" : v.toFixed(0) + " ms"; }
+function headers() {
+  const h = { "Content-Type": "application/json" };
+  if ($("key").value) h["Authorization"] = "Bearer " + $("key").value;
+  return h;
+}
+function base() { return $("url").value.replace(/\/$/, ""); }
+
+// ---- setup
+if (location.protocol.startsWith("http")) $("url").value = location.origin; // served by llama-server
+for (const name of Object.keys(PRESETS).concat(["Custom"])) $("preset").appendChild(el("option", { value: name }, name));
+$("preset").value = load("dp.preset", "Photo");
+$("schema").value = load("dp.schema", JSON.stringify(PRESETS[$("preset").value] || PRESETS["Photo"], null, 2));
+$("preset").addEventListener("change", () => {
+  if (PRESETS[$("preset").value]) $("schema").value = JSON.stringify(PRESETS[$("preset").value], null, 2);
+  checkSchema();
+});
+$("schema").addEventListener("input", () => { $("preset").value = "Custom"; checkSchema(); });
+function checkSchema() {
+  try {
+    const s = JSON.parse($("schema").value);
+    $("schemaState").textContent = Object.keys(s).length + " fields";
+    $("schemaState").className = "hint";
+    return s;
+  } catch (e) {
+    $("schemaState").textContent = "schema is not valid JSON: " + e.message;
+    $("schemaState").className = "err";
+    return null;
+  }
+}
+checkSchema();
+
+function applyMode() {
+  const body = $("appmode").value === "body";
+  $("bodyInfo").hidden = !body;
+  $("sizeBlock").hidden = !body;
+  if (body) {
+    $("preset").value = "Body photo check";
+    $("schema").value = JSON.stringify(PRESETS["Body photo check"], null, 2);
+    $("runas").value = "decision";
+    $("schemaBlock").open = false;
+    $("schemaSummary").textContent = "Schema (fixed for this mode, open to look)";
+    checkSchema();
+  } else {
+    $("schemaSummary").textContent = "Schema";
+    $("schemaBlock").open = true;
+  }
+  $("preset").disabled = body;
+  $("schema").readOnly = body;
+  $("runas").disabled = body;
+  if (body) drawCalibration(); // after the body schema is in place
+  store("dp.mode", $("appmode").value);
+}
+$("appmode").value = load("dp.mode", "general");
+$("appmode").addEventListener("change", applyMode);
+
+async function showModel() {
+  try {
+    const r = await fetch(base() + "/v1/models", { headers: headers() });
+    const js = await r.json();
+    const m = (js.data && js.data[0]) || (js.models && js.models[0]);
+    $("model").textContent = m ? String(m.id || m.name || "").split("/").pop() : "";
+  } catch (e) { $("model").textContent = ""; }
+}
+$("url").addEventListener("change", showModel);
+$("key").addEventListener("change", showModel);
+showModel();
+
+// ---- images: click, drop, paste
+function addFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) continue;
+    const r = new FileReader();
+    r.onload = () => { images.push({ name: f.name || "pasted image", url: r.result }); drawThumbs(); };
+    r.readAsDataURL(f);
+  }
+}
+function drawThumbs() {
+  const box = $("thumbs");
+  box.innerHTML = "";
+  images.forEach((im, i) => {
+    const t = el("div", { className: "thumb", title: im.name });
+    t.appendChild(el("img", { src: im.url, alt: im.name }));
+    const x = el("button", { className: "ghost", title: "remove" }, "x");
+    x.onclick = () => { images.splice(i, 1); drawThumbs(); };
+    t.appendChild(x);
+    box.appendChild(t);
+  });
+}
+$("drop").onclick = () => $("files").click();
+$("drop").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") $("files").click(); };
+$("files").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+$("drop").ondragover = (e) => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = (e) => { e.preventDefault(); $("drop").classList.remove("over"); addFiles(e.dataTransfer.files); };
+document.addEventListener("paste", (e) => addFiles([...e.clipboardData.items].filter((i) => i.kind === "file").map((i) => i.getAsFile())));
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); });
+
+// ---- request
+function scaled(url, maxSide) {
+  // scale the longer side down to maxSide; small images are sent as they are
+  return new Promise((ok) => {
+    if (!maxSide) return ok({ url, note: "original" });
+    const img = new Image();
+    img.onload = () => {
+      const s = maxSide / Math.max(img.width, img.height);
+      if (s >= 1) return ok({ url, note: img.width + "x" + img.height });
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      ok({ url: c.toDataURL("image/jpeg", 0.92), note: img.width + "x" + img.height + " -> " + c.width + "x" + c.height });
+    };
+    img.onerror = () => ok({ url, note: "not decodable in the browser, sent as is" });
+    img.src = url;
+  });
+}
+async function buildRequest() {
+  const schema = checkSchema();
+  if (!schema) return null;
+  const maxSide = parseInt($("maxside").value, 10);
+  const sent = await Promise.all(images.map((im) => scaled(im.url, maxSide)));
+  lastSizes = sent.map((x) => x.note);
+  const parts = sent.map((x) => ({ type: "image_url", image_url: { url: x.url } }));
+  if ($("text").value) parts.push({ type: "text", text: $("text").value });
+  const body = { schema, contexts: [parts.length ? parts : ($("text").value || " ")], mode: $("mode").value,
+                 temperature: parseFloat($("temp").value) || 1, return_probs: true, trace: $("trace").checked, cache_prompt: $("cache").checked, share_tokens: $("share").checked };
+  const minp = parseFloat($("minp").value), minm = parseFloat($("minm").value);
+  if (minp > 0 || minm > 0) body.abstain = { min_probability: minp || 0, min_margin: minm || 0 };
+  const prune = parseFloat($("prune").value);
+  if (prune > 0) body.tree_prune = prune;
+  if ($("compact").checked) body.compact_ranges = true;
+  const step = parseInt($("numstep").value, 10);
+  if (step > 1 && !schema.properties) {
+    body.schema = JSON.parse(JSON.stringify(schema));
+    for (const f of Object.values(body.schema)) {
+      if (f.type === "integer" && f.step === undefined && f.maximum - f.minimum + 1 > 20) f.step = step;
+    }
+  }
+  return body;
+}
+function redacted(body) {
+  // request without the image bytes, for display and download
+  const copy = JSON.parse(JSON.stringify(body));
+  for (const c of copy.contexts) {
+    if (!Array.isArray(c)) continue;
+    for (const p of c) if (p.image_url) p.image_url.url = p.image_url.url.slice(0, 32) + "... (" + p.image_url.url.length + " chars)";
+  }
+  return copy;
+}
+
+function jsonSchemaOf(schema) {
+  // the same fields as a JSON Schema for the chat response format
+  const props = {};
+  for (const [name, f] of Object.entries(schema)) {
+    if (f.properties) return schema;
+    const c = f.choices || f.enum;
+    if (c) props[name] = { type: "string", enum: c };
+    else if (f.type === "integer") props[name] = { type: "integer", minimum: f.minimum, maximum: f.maximum };
+    else if (f.type === "number") props[name] = { type: "number", minimum: f.minimum, maximum: f.maximum };
+    else props[name] = { type: "boolean" };
+    if (f.nullable) props[name] = { anyOf: [props[name], { type: "null" }] };
+  }
+  return { type: "object", properties: props, required: Object.keys(props), additionalProperties: false };
+}
+function allowedOf(f) {
+  if (f.choices || f.enum) return (f.choices || f.enum).map((v) => JSON.stringify(v)).join(", ");
+  if (f.type === "integer") return f.minimum + " to " + f.maximum;
+  if (f.type === "number") return f.minimum + " to " + f.maximum + " in steps of " + f.step;
+  return "true, false";
+}
+function systemTextOf(schema, instructions, compact) {
+  // the field catalogue the decision puts in the system message (compile_schema)
+  const lines = [];
+  for (const [n, f] of Object.entries(schema)) {
+    let vals;
+    if (f.choices || f.enum) vals = (f.choices || f.enum).map((v) => JSON.stringify(v));
+    else if (f.type === "boolean") vals = ["true", "false"];
+    else if (f.type === "integer") { vals = []; for (let v = f.minimum; v <= f.maximum; v += f.step || 1) vals.push(String(v)); }
+    else {
+      const dec = (x) => { const t = String(x); return t.includes(".") ? t.split(".")[1].length : 0; };
+      const places = Math.max(dec(f.minimum), dec(f.maximum), dec(f.step));
+      vals = [];
+      for (let i = 0; f.minimum + i * f.step <= f.maximum + 1e-9; i++) vals.push((f.minimum + i * f.step).toFixed(places));
+    }
+    let allowed = vals.concat(f.nullable ? ["null"] : []).join(", ");
+    if (compact && (f.type === "integer" || f.type === "number") && vals.length > 2) {
+      const step = f.type === "integer" ? (f.step || 1) : f.step;
+      allowed = (f.type === "integer" ? "integers" : "numbers") + " from " + vals[0] + " to " + vals[vals.length - 1] +
+                (f.type === "integer" && step === 1 ? "" : " in steps of " + step) + (f.nullable ? ", or null" : "");
+    }
+    lines.push(JSON.stringify(n) + (f.description ? ": " + f.description : "") + "\nAllowed values: " + allowed);
+  }
+  return "Select the requested field value from its allowed values, based on the context. Respond with the JSON value only.\n\nFields:\n" +
+         lines.join("\n") + "\n" + (instructions || "");
+}
+function chatRequest(body, system) {
+  // the same system and user message as the decision; only the way the answer is made differs
+  return { messages: [{ role: "system", content: system }, { role: "user", content: body.contexts[0] }], temperature: 0,
+           max_tokens: 64 + 32 * Object.keys(body.schema).length, logprobs: true, top_logprobs: 5,
+           response_format: { type: "json_schema", json_schema: { schema: jsonSchemaOf(body.schema) } },
+           chat_template_kwargs: { enable_thinking: false }, cache_prompt: body.cache_prompt };
+}
+function userTextOf(context) {
+  // user message as the template sees it: images as markers, parts joined like chat parts
+  if (!Array.isArray(context)) return context;
+  let text = "", lastMedia = false;
+  for (const p of context) {
+    if (p.type === "image_url") { text += "<image>"; lastMedia = true; }
+    else { if (!lastMedia && text) text += "\n"; text += p.text; lastMedia = false; }
+  }
+  return text;
+}
+async function post(path, body) {
+  const t0 = performance.now();
+  const r = await fetch(base() + path, { method: "POST", headers: headers(), body: JSON.stringify(body) });
+  const js = await r.json();
+  if (!r.ok) throw new Error(path + ": " + ((js.error && js.error.message) || r.statusText));
+  return { js, ms: performance.now() - t0 };
+}
+
+async function run(opts) {
+  opts = opts || {};
+  if ($("run").disabled) return false;
+  if ($("source").value === "webcam") {
+    const frame = grabFrame();
+    if (!frame) { showError("start the camera first"); return false; }
+    images = [{ name: "webcam " + new Date().toLocaleTimeString(), url: frame }];
+  }
+  const body = await buildRequest();
+  if (!body) return false;
+  store("dp.preset", $("preset").value); store("dp.schema", $("schema").value);
+  const mode = $("runas").value;
+  const out = $("out");
+  const t0 = performance.now();
+  let step = "", tick = null;
+  if (opts.live) {
+    liveBusy(true);
+  } else {
+    $("run").disabled = true;
+    out.innerHTML = "";
+    out.appendChild(el("h2", {}, "Result"));
+    const wait = el("p", { className: "hint" }, "working...");
+    out.appendChild(wait);
+    if (lastSizes.length) out.appendChild(el("p", { className: "hint" }, "images: " + lastSizes.join(", ")));
+    tick = setInterval(() => {
+      const s = (performance.now() - t0) / 1000;
+      wait.textContent = step + " " + s.toFixed(0) + " s" + (s > 20 ? " (the server is still working; large images take long on a CPU)" : "");
+    }, 1000);
+  }
+  try {
+    const runData = { mode, at: new Date().toISOString(), images: lastSizes, request: redacted(body), preset: $("preset").value };
+    if (mode !== "chat") {
+      step = "decision...";
+      const d = await post("/v1/decision", body);
+      runData.response = d.js;
+      runData.round_trip_ms = d.ms;
+    }
+    if (mode !== "decision") {
+      step = mode === "compare" ? "decision done, chat..." : "chat...";
+      const fromTrace = runData.response && runData.response.trace && runData.response.trace.instructions;
+      const system = fromTrace || systemTextOf(body.schema, body.instructions, body.compact_ranges);
+      const creq = chatRequest(body, system);
+      const c = await post("/v1/chat/completions", creq);
+      runData.chat = { request: redacted({ contexts: [creq.messages[1].content], rest: Object.assign({}, creq, { messages: undefined }), system }),
+                       response: c.js, round_trip_ms: c.ms, system_from: fromTrace ? "decision trace" : "rebuilt in the page" };
+      try {
+        const tpl = await post("/apply-template", { messages: [{ role: "system", content: system }, { role: "user", content: userTextOf(body.contexts[0]) }],
+                                                     chat_template_kwargs: { enable_thinking: false } });
+        runData.chat.prompt = tpl.js.prompt;
+      } catch (e) { runData.chat.prompt = null; }
+    }
+    last = runData;
+    if (opts.live) {
+      renderLive(runData, performance.now() - t0);
+      logLive(runData, performance.now() - t0);
+    } else {
+      render(runData);
+      remember(runData);
+    }
+  } catch (e) {
+    if (opts.live) {
+      logLine(new Date().toLocaleTimeString() + "  error: " + (e.message || e), "bad");
+      const st = document.getElementById("liveStamp");
+      if (st) st.textContent = "error: " + (e.message || e);
+    } else {
+      showError(String(e.message || e));
+    }
+  } finally {
+    if (tick) clearInterval(tick);
+    if (opts.live) liveBusy(false); else $("run").disabled = false;
+  }
+}
+$("run").onclick = () => run();
+function showError(msg) {
+  const out = $("out");
+  out.innerHTML = "";
+  out.appendChild(el("h2", {}, "Result"));
+  out.appendChild(el("p", { className: "err" }, msg));
+}
+
+// ---- size correction: known height, or a fit on the user's own measurements
+function sizeFields() {
+  const schema = checkSchema() || {};
+  return Object.keys(schema).filter((k) => /_cm$/.test(k) && (schema[k].type === "integer" || schema[k].type === "number"));
+}
+function estimateOf(f) {
+  const p = f.probs ? f.probs.find((c) => c.value === null) : null;
+  return { value: f.value, lo: f.interval_p10_p90 ? f.interval_p10_p90[0] : null, hi: f.interval_p10_p90 ? f.interval_p10_p90[1] : null,
+           p_null: p ? p.probability : null };
+}
+function samples() { return load("dp.calSamples", []); }
+function fitField(pairs) {
+  // pairs of [estimate, truth]; offset from 2, straight line from 5; kept only if leave-one-out beats the raw error
+  const n = pairs.length;
+  if (n < 2) return null;
+  const fit = (ps, linear) => {
+    const me = ps.reduce((a, p) => a + p[0], 0) / ps.length, mt = ps.reduce((a, p) => a + p[1], 0) / ps.length;
+    let sxx = 0, sxy = 0;
+    for (const [e, t] of ps) { sxx += (e - me) * (e - me); sxy += (e - me) * (t - mt); }
+    if (!linear || sxx === 0) return { a: 1, b: mt - me };
+    const a = sxy / sxx;
+    return { a, b: mt - a * me };
+  };
+  const loo = (linear) => pairs.map((p, i) => {
+    const m = fit(pairs.filter((_, j) => j !== i), linear);
+    return p[1] - (m.a * p[0] + m.b);
+  });
+  const mae = (rs) => rs.reduce((a, r) => a + Math.abs(r), 0) / rs.length;
+  const raw = mae(pairs.map((p) => p[1] - p[0]));
+  const rOff = loo(false), rLin = n >= 5 ? loo(true) : null;
+  const linear = rLin !== null && mae(rLin) < mae(rOff);
+  const res = linear ? rLin : rOff;
+  const m = fit(pairs, linear);
+  // split-conformal: the ceil((n+1)*0.8)-th smallest absolute residual covers about 80% of new cases
+  const abs = res.map(Math.abs).sort((x, y) => x - y);
+  const k = Math.ceil((n + 1) * 0.8) - 1;
+  return { n, kind: linear ? "line" : "offset", a: m.a, b: m.b, mae_raw: raw, mae_cal: mae(res), half_width: abs[Math.min(k, n - 1)],
+           range_ok: k < n, apply: mae(res) < raw };
+}
+function fits() {
+  const out = {};
+  for (const name of sizeFields()) {
+    const pairs = samples().filter((s) => s.truth[name] !== undefined && s.truth[name] !== null && s.est[name] && s.est[name].value !== null && s.est[name].value !== undefined)
+                           .map((s) => [s.est[name].value, s.truth[name]]);
+    const f = fitField(pairs);
+    const withNone = samples().filter((s) => s.truth[name] !== undefined && s.est[name]);
+    out[name] = { fit: f, pairs: pairs.length, none_right: withNone.filter((s) => (s.truth[name] === null) === (s.est[name].value === null)).length, none_n: withNone.length };
+  }
+  return out;
+}
+function corrected(name, f, all) {
+  // corrected {value, lo, hi} or a note; null for fields that are not sizes
+  if (!/_cm$/.test(name) || !f) return null;
+  const how = $("correction").value;
+  if (how === "none" || f.value === null) return null;
+  if (how === "height") {
+    const known = parseFloat($("knownHeight").value), est = all.height_cm && all.height_cm.value;
+    if (!known) return { note: "enter the known height" };
+    if (!est) return { note: "height not visible: no scale" };
+    const k = known / est;
+    if (name === "height_cm") return { value: known, lo: known, hi: known };
+    return { value: f.value * k, lo: f.interval_p10_p90 ? f.interval_p10_p90[0] * k : null, hi: f.interval_p10_p90 ? f.interval_p10_p90[1] * k : null };
+  }
+  const c = fits()[name];
+  if (!c || !c.fit) return { note: "not calibrated yet" };
+  if (!c.fit.apply) return { note: "calibration not better than raw" };
+  const v = c.fit.a * f.value + c.fit.b;
+  return { value: v, lo: v - c.fit.half_width, hi: v + c.fit.half_width };
+}
+function corrText(name, f, all) {
+  const c = corrected(name, f, all);
+  if (!c) return "";
+  if (c.note) return "  [" + c.note + "]";
+  return "  -> " + Math.round(c.value) + (c.lo !== null && c.lo !== undefined ? " (" + Math.round(c.lo) + "-" + Math.round(c.hi) + ")" : "");
+}
+function drawCalibration() {
+  const form = $("truthForm");
+  const names = sizeFields();
+  if (form.dataset.fields !== names.join(",")) {
+    form.innerHTML = "";
+    for (const n of names) {
+      const d = el("div");
+      d.appendChild(el("label", { htmlFor: "truth-" + n }, n + " true"));
+      const inp = el("input", { id: "truth-" + n, type: "text", placeholder: "cm, empty = skip, none" });
+      d.appendChild(inp);
+      form.appendChild(d);
+    }
+    form.dataset.fields = names.join(",");
+  }
+  const all = fits(), n = samples().length;
+  $("calCount").textContent = n;
+  const tb = $("calTable");
+  tb.innerHTML = "";
+  tb.appendChild(rowOf(["size", "samples", "correction", "error raw", "error calibrated", "80% range", "none right", ""], "th"));
+  for (const name of names) {
+    const c = all[name], f = c.fit;
+    const tr = rowOf([name, c.pairs, f ? (f.kind === "line" ? f.a.toFixed(2) + " x + " + f.b.toFixed(1) : (f.b >= 0 ? "+" : "") + f.b.toFixed(1) + " cm") : "-",
+                      f ? f.mae_raw.toFixed(1) + " cm" : "-", f ? f.mae_cal.toFixed(1) + " cm" : "-",
+                      f ? "+-" + f.half_width.toFixed(1) + (f.range_ok ? "" : " (few samples)") : "-",
+                      c.none_n ? c.none_right + "/" + c.none_n : "-", f ? (f.apply ? "used" : "not better") : "need 2"]);
+    tr.lastChild.className = f && f.apply ? "same" : "diff";
+    tb.appendChild(tr);
+  }
+}
+$("correction").onchange = () => { store("dp.correction", $("correction").value); if (last) (liveTimer ? renderLive(last, 0) : render(last)); };
+$("knownHeight").onchange = $("correction").onchange;
+$("correction").value = load("dp.correction", "none");
+$("calAdd").onclick = () => {
+  const r = last && last.response && last.response.results[0];
+  if (!r) { $("calMsg").textContent = "run a decision first"; return; }
+  const truth = {}, est = {};
+  for (const n of sizeFields()) {
+    const raw = ($("truth-" + n).value || "").trim().toLowerCase();
+    if (raw === "") continue;
+    if (raw === "none" || raw === "null") truth[n] = null;
+    else if (isFinite(parseFloat(raw))) truth[n] = parseFloat(raw);
+    else { $("calMsg").textContent = n + ": enter a number in cm, or none"; return; }
+    if (r.fields[n]) est[n] = estimateOf(r.fields[n]);
+  }
+  if (!Object.keys(truth).length) { $("calMsg").textContent = "enter at least one true size"; return; }
+  const all = samples();
+  all.push({ at: new Date().toISOString(), est, truth });
+  store("dp.calSamples", all);
+  for (const n of sizeFields()) $("truth-" + n).value = "";
+  $("calMsg").textContent = "sample added";
+  drawCalibration();
+};
+$("calExport").onclick = () => {
+  const data = { kind: "decision-size-calibration", version: 1, exported: new Date().toISOString(), samples: samples(), fits: fits() };
+  const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })), download: "size-calibration.json" });
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("calImportBtn").onclick = () => $("calImport").click();
+$("calImport").onchange = async (e) => {
+  try {
+    const data = JSON.parse(await e.target.files[0].text());
+    if (!Array.isArray(data.samples)) throw new Error("no samples in this file");
+    const all = samples(), seen = new Set(all.map((x) => x.at + JSON.stringify(x.truth)));
+    let added = 0;
+    for (const x of data.samples) if (x.est && x.truth && !seen.has(x.at + JSON.stringify(x.truth))) { all.push(x); added++; }
+    store("dp.calSamples", all);
+    $("calMsg").textContent = added + " samples imported";
+    drawCalibration();
+  } catch (err) { $("calMsg").textContent = "import failed: " + (err.message || err); }
+  e.target.value = "";
+};
+$("calClear").onclick = () => {
+  if (!confirm("Delete all calibration samples in this browser?")) return;
+  store("dp.calSamples", []);
+  drawCalibration();
+};
+
+// ---- webcam
+let stream = null, liveTimer = null, busy = false, skipped = 0, frames = 0;
+function grabFrame() {
+  const v = $("cam");
+  if (!stream || !v.videoWidth) return null;
+  const maxSide = parseInt($("maxside").value, 10) || Math.max(v.videoWidth, v.videoHeight);
+  const s = Math.min(1, maxSide / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.round(v.videoWidth * s); c.height = Math.round(v.videoHeight * s);
+  c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.9);
+}
+async function listCameras() {
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+    const sel = $("camera"), cur = sel.value;
+    sel.innerHTML = "";
+    sel.appendChild(el("option", { value: "" }, "default"));
+    devs.forEach((d, i) => sel.appendChild(el("option", { value: d.deviceId }, d.label || "camera " + (i + 1))));
+    sel.value = cur;
+  } catch (e) { /* no device list */ }
+}
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $("liveState").textContent = "No camera access here: browsers allow it only on localhost / 127.0.0.1 or https.";
+    return;
+  }
+  stopCamera();
+  try {
+    const id = $("camera").value;
+    stream = await navigator.mediaDevices.getUserMedia({ video: id ? { deviceId: { exact: id } } : { width: { ideal: 1280 } }, audio: false });
+    $("cam").srcObject = stream;
+    await listCameras();
+    $("camStart").textContent = "stop camera";
+    $("liveStart").disabled = false; $("snap").disabled = false;
+    $("liveState").textContent = "Camera on. Frames stay on this machine; live frames are not kept in the history.";
+  } catch (e) {
+    $("liveState").textContent = "Camera not available: " + (e.message || e.name);
+  }
+}
+function stopCamera() {
+  stopLive();
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null;
+  $("cam").srcObject = null;
+  $("camStart").textContent = "start camera";
+  $("liveStart").disabled = true; $("snap").disabled = true;
+}
+async function tick() {
+  if (document.hidden) return; // paused while the tab is not visible
+  if (busy || $("run").disabled) { skipped++; updateLiveState(); return; } // a manual run also blocks
+  busy = true;
+  frames++;
+  try { await run({ live: true }); } finally { busy = false; updateLiveState(); }
+}
+function updateLiveState() {
+  if (!liveTimer) return;
+  $("liveState").innerHTML = "";
+  $("liveState").appendChild(el("span", { className: "live-dot" }));
+  $("liveState").appendChild(document.createTextNode("live every " + $("interval").selectedOptions[0].text + ": " + frames + " frames analysed, " + skipped + " skipped because the previous one was still running"));
+}
+function startLive() {
+  const every = parseInt($("interval").value, 10);
+  if (!every) { tick(); return; }
+  stopLive();
+  frames = 0; skipped = 0;
+  $("liveLog").hidden = false;
+  liveTimer = setInterval(tick, every);
+  $("liveStart").textContent = "stop live";
+  updateLiveState();
+  tick();
+}
+function stopLive() {
+  if (!liveTimer) return;
+  clearInterval(liveTimer);
+  liveTimer = null;
+  $("liveStart").textContent = "start live";
+  $("liveState").textContent = "live stopped: " + frames + " frames analysed, " + skipped + " skipped" + (busy ? "; the last frame is still being analysed" : "");
+}
+// ---- live view: built once, then only the cells change
+let liveKey = "";
+function liveBusy(on) {
+  const b = document.getElementById("liveBusy");
+  if (b) b.classList.toggle("on", on);
+}
+function fieldValues(runData) {
+  // {name: {value, p, margin, abstain}} from the decision, or the chat values without probabilities
+  const out = {};
+  if (runData.response) {
+    for (const [k, f] of Object.entries(runData.response.results[0].fields)) out[k] = { value: f.value, p: f.probability, margin: f.margin, abstain: f.abstain, interval: f.interval_p10_p90 };
+  } else {
+    for (const [k, v] of Object.entries(chatValues(runData) || {})) out[k] = { value: v };
+  }
+  return out;
+}
+function buildLiveView(names, runData) {
+  const out = $("out");
+  out.innerHTML = "";
+  const view = el("div", { id: "liveView" });
+  const head = el("div", { className: "actions" });
+  head.style.marginTop = "0";
+  head.appendChild(el("h2", { style: "margin: 0 auto 0 0" }, "Live"));
+  head.appendChild(el("span", { id: "liveBusy", className: "busy hint" }, "analysing..."));
+  const full = el("button", { className: "ghost" }, "full trace of this frame");
+  full.onclick = () => { stopLive(); render(last); liveKey = ""; };
+  head.appendChild(full);
+  view.appendChild(head);
+  view.appendChild(el("div", { id: "liveStamp", className: "hint" }, ""));
+  if (GATES[runData.preset]) {
+    const box = el("div", { className: "cols", style: "margin-top: 8px" });
+    const v = el("div");
+    v.appendChild(el("h3", {}, GATES[runData.preset].title));
+    v.appendChild(el("div", { id: "liveVerdict", className: "big" }, ""));
+    v.appendChild(el("div", { id: "liveVerdictWhy", className: "hint" }, ""));
+    box.appendChild(v);
+    view.appendChild(box);
+  }
+  const tb = el("table", { id: "liveTable" });
+  tb.appendChild(rowOf(["field", "value", "", "p", "margin", ""], "th"));
+  for (const n of names) {
+    const tr = el("tr", { id: "lv-" + n });
+    tr.appendChild(el("td", {}, n));
+    const v = el("td"); v.appendChild(el("span", { className: "val" }, "")); tr.appendChild(v);
+    const t = el("td"), track = el("div", { className: "track" }), fill = el("div", { className: "fill" });
+    fill.style.width = "0%"; track.appendChild(fill); t.appendChild(track); tr.appendChild(t);
+    tr.appendChild(el("td", {}, "")); tr.appendChild(el("td", {}, "")); tr.appendChild(el("td", {}, ""));
+    tb.appendChild(tr);
+  }
+  const w = el("div", { className: "table-wrap" }); w.appendChild(tb);
+  view.appendChild(w);
+  out.appendChild(view);
+}
+function renderLive(runData, wall) {
+  const vals = fieldValues(runData), names = Object.keys(vals);
+  const key = names.join(",") + "|" + runData.preset;
+  if (key !== liveKey || !document.getElementById("liveView")) { buildLiveView(names, runData); liveKey = key; }
+  for (const n of names) {
+    const f = vals[n], tr = document.getElementById("lv-" + n);
+    if (!tr) continue;
+    const cells = tr.children, span = cells[1].firstChild,
+          text = show(f.value) + (f.interval ? " (" + f.interval.map(show).join("-") + ")" : "") +
+                 (runData.response ? corrText(n, runData.response.results[0].fields[n], runData.response.results[0].fields) : "");
+    if (span.textContent !== text) {
+      if (span.textContent) { span.classList.add("flash"); setTimeout(() => span.classList.remove("flash"), 60); }
+      span.textContent = text;
+    }
+    cells[2].firstChild.firstChild.style.width = f.p === undefined ? "0%" : (100 * f.p).toFixed(1) + "%";
+    cells[3].textContent = f.p === undefined ? "-" : f.p.toFixed(3);
+    cells[4].textContent = f.margin === undefined ? "" : f.margin.toFixed(3);
+    cells[5].textContent = f.abstain === undefined ? "" : f.abstain ? "abstain" : "accept";
+    cells[5].className = f.abstain ? "diff" : "same";
+  }
+  const gate = GATES[runData.preset];
+  if (gate && document.getElementById("liveVerdict")) {
+    const failed = [], unsure = [];
+    for (const [k, ok] of Object.entries(gate.rules)) {
+      const f = vals[k];
+      if (!f) continue;
+      if (f.abstain) unsure.push(k);
+      else if (!ok.some((x) => JSON.stringify(x) === JSON.stringify(f.value))) failed.push(k + " = " + JSON.stringify(f.value));
+    }
+    const verdict = failed.length ? "no" : unsure.length ? "unsure" : "yes";
+    const vd = document.getElementById("liveVerdict");
+    vd.textContent = verdict;
+    vd.className = "big " + (verdict === "yes" ? "same" : "diff");
+    document.getElementById("liveVerdictWhy").textContent = failed.length ? "fails: " + failed.join(", ") : unsure.length ? "uncertain: " + unsure.join(", ") : "all checks pass";
+  }
+  const t = runData.response ? runData.response.timings : null;
+  document.getElementById("liveStamp").textContent = "updated " + new Date().toLocaleTimeString() + ", " + (wall / 1000).toFixed(2) + " s" +
+    (t ? " (server " + ms(t.total_ms) + ")" : "") + (runData.images && runData.images[0] ? ", frame " + runData.images[0] : "");
+}
+function logLine(text, cls) {
+  const log = $("liveLog");
+  log.hidden = false;
+  const line = el("div", { className: cls || "" }, text);
+  log.insertBefore(line, log.firstChild);
+  while (log.childNodes.length > 50) log.removeChild(log.lastChild);
+}
+function logLive(runData, wall) {
+  const res = runData.response;
+  const r = res ? res.results[0] : null;
+  const gate = r && GATES[runData.preset];
+  let verdict = "", cls = "";
+  if (gate) {
+    const bad = Object.entries(gate.rules).some(([k, ok]) => r.fields[k] && !r.fields[k].abstain && !ok.some((x) => JSON.stringify(x) === JSON.stringify(r.fields[k].value)));
+    const unsure = Object.keys(gate.rules).some((k) => r.fields[k] && r.fields[k].abstain);
+    verdict = bad ? " -> no" : unsure ? " -> unsure" : " -> yes";
+    cls = bad || unsure ? "bad" : "good";
+  }
+  const vals = r ? Object.entries(r.fields).map(([k, f]) => k + "=" + show(f.value) + (f.abstain ? "?" : "")).join(" ") : JSON.stringify(chatValues(runData));
+  logLine(new Date().toLocaleTimeString() + "  " + (wall / 1000).toFixed(2) + " s  " + vals + verdict, cls);
+}
+$("source").onchange = () => {
+  const cam = $("source").value === "webcam";
+  $("imageBlock").hidden = cam;
+  $("camBlock").hidden = !cam;
+  if (!cam) stopCamera();
+  store("dp.source", $("source").value);
+};
+$("camStart").onclick = () => (stream ? stopCamera() : startCamera());
+$("camera").onchange = () => { if (stream) startCamera(); };
+$("liveStart").onclick = () => (liveTimer ? stopLive() : startLive());
+$("interval").onchange = () => { if (liveTimer) startLive(); };
+$("snap").onclick = () => run();
+document.addEventListener("visibilitychange", updateLiveState);
+$("source").value = load("dp.source", "images");
+$("source").onchange();
+$("clearHistory").onclick = () => {
+  try { localStorage.removeItem("dp.history"); } catch (e) { /* storage off */ }
+  $("history").innerHTML = "";
+  $("history").appendChild(el("span", { className: "hint" }, "History cleared."));
+};
+
+// ---- rendering
+function renderDecision(runData, out) {
+  const res = runData.response, r = res.results[0];
+  const gate = GATES[runData.preset];
+  if (gate) {
+    const failed = [], unsure = [], notes = [];
+    for (const [k, ok] of Object.entries(gate.rules)) {
+      const f = r.fields[k];
+      if (!f) continue;
+      if (f.abstain) unsure.push(k + " (p " + f.probability.toFixed(2) + ")");
+      else if (!ok.some((v) => JSON.stringify(v) === JSON.stringify(f.value))) failed.push(k + " = " + JSON.stringify(f.value));
+    }
+    for (const [k, bad] of Object.entries(gate.hints || {})) {
+      const f = r.fields[k];
+      if (f && bad.some((v) => JSON.stringify(v) === JSON.stringify(f.value))) notes.push(gate.hint_text[k]);
+    }
+    const verdict = failed.length ? "no" : unsure.length ? "unsure" : "yes";
+    const box = el("div", { className: "cols" });
+    const v = el("div");
+    v.appendChild(el("h3", {}, gate.title));
+    v.appendChild(el("div", { className: "big " + (verdict === "yes" ? "same" : "diff") }, verdict === "yes" ? "yes" : verdict === "no" ? "no" : "unsure - take it again or check"));
+    const tb = el("table");
+    tb.appendChild(rowOf(["check", "wanted", "model says", "p", ""], "th"));
+    for (const [k, ok] of Object.entries(gate.rules)) {
+      const f = r.fields[k];
+      if (!f) continue;
+      const pass = ok.some((x) => JSON.stringify(x) === JSON.stringify(f.value));
+      const status = f.abstain ? "? unsure" : pass ? "ok" : "x fails";
+      const tr = rowOf([k, ok.map((x) => JSON.stringify(x)).join(" or "), JSON.stringify(f.value), f.probability.toFixed(2), status]);
+      tr.lastChild.className = f.abstain ? "diff" : pass ? "same" : "diff";
+      tb.appendChild(tr);
+    }
+    v.appendChild(tb);
+    if (notes.length) v.appendChild(el("div", { className: "hint" }, "notes: " + notes.join("; ")));
+    box.appendChild(v);
+    out.appendChild(box);
+  }
+  out.appendChild(el("div", { className: "decision" }, JSON.stringify(r.decision, null, 1)));
+  if (r.abstained) {
+    out.appendChild(el("p", { className: r.abstained.length ? "err" : "hint" },
+      r.abstained.length ? "Escalate (below the abstain rule): " + r.abstained.join(", ") : "All fields pass the abstain rule."));
+  }
+
+  for (const [name, f] of Object.entries(r.fields)) {
+    const box = el("div", { className: "field" });
+    const h = el("h3");
+    h.appendChild(el("span", {}, name + " = " + show(f.value) + range(f) + corrText(name, f, r.fields)));
+    h.appendChild(el("span", { className: "meta" }, "p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) + "  entropy " + f.entropy.toFixed(3) : "") + (f.tree ? "" : "  (greedy)")));
+    if (f.abstain !== undefined) h.appendChild(el("span", { className: "badge " + (f.abstain ? "abstain" : "ok") }, f.abstain ? "abstain" : "accept"));
+    box.appendChild(h);
+    for (const c of (f.probs || [{ value: f.value, probability: f.probability }])) {
+      const bar = el("div", { className: "bar" + (JSON.stringify(c.value) === JSON.stringify(f.value) ? " win" : "") });
+      bar.appendChild(el("span", { title: show(c.value) }, show(c.value)));
+      const track = el("div", { className: "track" }), fill = el("div", { className: "fill" });
+      fill.style.width = (100 * c.probability).toFixed(1) + "%";
+      track.appendChild(fill);
+      bar.appendChild(track);
+      bar.appendChild(el("span", {}, (100 * c.probability).toFixed(1) + "%"));
+      box.appendChild(bar);
+    }
+    out.appendChild(box);
+  }
+
+  // timing
+  const t = res.timings, enc = t.media_encode_ms || 0;
+  const segs = [["image encode", enc, "--seg1"], ["prefill", Math.max(t.prefill_ms - enc, 0), "--seg2"], ["field scoring", t.scoring_ms, "--seg3"]];
+  const tl = el("div", { className: "timeline", title: "server time " + ms(t.total_ms) });
+  const legend = el("div", { className: "legend" });
+  for (const [label, v, color] of segs) {
+    if (v <= 0) continue;
+    const d = el("div");
+    d.style.width = (100 * v / t.total_ms).toFixed(2) + "%";
+    d.style.background = "var(" + color + ")";
+    tl.appendChild(d);
+    const item = el("span");
+    const sw = el("i");
+    sw.style.background = "var(" + color + ")";
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(label + " " + ms(v)));
+    legend.appendChild(item);
+  }
+  legend.appendChild(el("span", {}, "server " + ms(t.total_ms) + ", round trip " + ms(runData.round_trip_ms)));
+  out.appendChild(el("h2", { style: "margin-top: 16px" }, "Time"));
+  out.appendChild(tl);
+  out.appendChild(legend);
+
+  // trace
+  out.appendChild(el("h2", { style: "margin-top: 16px" }, "Trace"));
+  const tr = res.trace, ct = r.trace;
+  if (tr && ct) {
+    const steps = el("details", { open: true });
+    steps.appendChild(el("summary", {}, "What happened"));
+    const ol = el("ol");
+    const imgs = ct.chunks.filter((c) => c.type === "image");
+    const lines = [
+      (runData.images && runData.images.length ? "Images sent: " + runData.images.join(", ") + ". " : "") + "Instructions and field list: " + tr.prefix_tokens + " tokens, " + (tr.prefix_cached ? "reused from the cache" : "decoded") + ".",
+      imgs.length ? imgs.length + " image" + (imgs.length > 1 ? "s" : "") + " encoded by the vision projector: " + imgs.map((c) => c.tokens + " tokens on " + c.positions + " positions" + (c.cached ? " (cached embedding)" : "")).join(", ") + "." : "No image in this context.",
+      "Context decoded into its own KV sequence from position " + ct.position_start + ": " + ct.chunks.map((c) => c.type + " " + c.tokens).join(" + ") + " tokens.",
+      "All " + tr.fields.length + " fields branch off that sequence at position " + ct.position_fields + " and are scored together (" + res.timings.rounds + " round" + (res.timings.rounds > 1 ? "s" : "") + ", " + res.usage.scored_rows + " rows" + (res.usage.decoded_rows != null ? " (" + res.usage.decoded_rows + " decoded)" : "") + ", mode " + tr.mode + ").",
+      "The JSON is assembled from the scores, so it always matches the schema."
+    ];
+    for (const l of lines) ol.appendChild(el("li", {}, l));
+    steps.appendChild(ol);
+    out.appendChild(steps);
+
+    const prompt = el("details");
+    prompt.appendChild(el("summary", {}, "Prompt as the model sees it"));
+    const pre = el("pre");
+    pre.appendChild(document.createTextNode(tr.prompt_prefix));
+    ct.prompt.split("<image>").forEach((part, i, all) => {
+      pre.appendChild(document.createTextNode(part));
+      if (i < all.length - 1) pre.appendChild(el("span", { className: "img" }, "[image " + (i + 1) + "]"));
+    });
+    for (const f of tr.fields) pre.appendChild(document.createTextNode("\n  " + JSON.stringify(f.name) + ": <" + (f.values || f.candidates).join(" | ") + ">"));
+    prompt.appendChild(pre);
+    out.appendChild(prompt);
+
+    const chunks = el("details");
+    chunks.appendChild(el("summary", {}, "Chunks and positions"));
+    const w1 = el("div", { className: "table-wrap" }), t1 = el("table");
+    t1.appendChild(rowOf(["#", "type", "tokens", "positions", "image id", "cached"], "th"));
+    ct.chunks.forEach((c, i) => t1.appendChild(rowOf([i + 1, c.type, c.tokens, c.positions === undefined ? c.tokens : c.positions, c.id || "", c.cached === undefined ? "" : (c.cached ? "yes" : "no")])));
+    w1.appendChild(t1);
+    chunks.appendChild(w1);
+    chunks.appendChild(el("p", { className: "hint" }, "Fields start at position " + ct.position_fields + ", after " + ct.position_start + " prefix positions and " + (ct.position_fields - ct.position_start) + " context positions (" + r.usage.context_tokens + " context tokens). Group " + ct.group + " of " + tr.groups + "."));
+    out.appendChild(chunks);
+
+    const fields = el("details");
+    fields.appendChild(el("summary", {}, "Fields as scored"));
+    const w2 = el("div", { className: "table-wrap" }), t2 = el("table");
+    t2.appendChild(rowOf(["field", "values", "scored text after", "T", "abstain p", "abstain margin"], "th"));
+    for (const f of tr.fields) t2.appendChild(rowOf([f.name, (f.values || []).join(" | "), f.suffix.trim() + " ...", f.temperature, f.min_probability, f.min_margin]));
+    w2.appendChild(t2);
+    fields.appendChild(w2);
+    out.appendChild(fields);
+  } else {
+    out.appendChild(el("p", { className: "hint" }, "Enable trace to see the prompt, chunks and positions."));
+  }
+  const raw = el("details");
+  raw.appendChild(el("summary", {}, "Raw request and response"));
+  raw.appendChild(el("pre", {}, "request " + JSON.stringify(runData.request, null, 1) + "\n\nresponse " + JSON.stringify(res, null, 1)));
+  out.appendChild(raw);
+}
+function chatValues(runData) {
+  try { return JSON.parse(runData.chat.response.choices[0].message.content); } catch (e) { return null; }
+}
+function renderChat(runData, out, withHeader) {
+  const res = runData.chat.response, t = res.timings || {};
+  const vals = chatValues(runData);
+  if (withHeader) out.appendChild(el("h2", { style: "margin-top: 16px" }, "Chat with json_schema"));
+  out.appendChild(el("div", { className: "decision" }, vals ? JSON.stringify(vals, null, 1) : res.choices[0].message.content));
+  out.appendChild(el("p", { className: "hint" }, "The model writes the JSON token by token under a grammar from the schema. There is no probability per field; the tokens below show what it generated."));
+  const prompt = t.prompt_ms || 0, gen = t.predicted_ms || 0, total = prompt + gen;
+  if (total > 0) {
+    const tl = el("div", { className: "timeline", title: "server " + ms(total) });
+    const legend = el("div", { className: "legend" });
+    for (const [label, v, color] of [["prompt incl. image " + (t.prompt_n || 0) + " tokens", prompt, "--seg1"], ["generation " + (t.predicted_n || 0) + " tokens", gen, "--seg3"]]) {
+      const d = el("div"); d.style.width = (100 * v / total).toFixed(2) + "%"; d.style.background = "var(" + color + ")"; tl.appendChild(d);
+      const item = el("span"), sw = el("i"); sw.style.background = "var(" + color + ")"; item.appendChild(sw);
+      item.appendChild(document.createTextNode(label + " " + ms(v))); legend.appendChild(item);
+    }
+    legend.appendChild(el("span", {}, "server " + ms(total) + ", round trip " + ms(runData.chat.round_trip_ms)));
+    out.appendChild(tl); out.appendChild(legend);
+  }
+  const lp = res.choices[0].logprobs && res.choices[0].logprobs.content;
+  if (lp && lp.length) {
+    const det = el("details");
+    det.appendChild(el("summary", {}, "Generated tokens (" + lp.length + ")"));
+    const w = el("div", { className: "table-wrap" }), tb = el("table");
+    tb.appendChild(rowOf(["#", "token", "p", "alternatives"], "th"));
+    lp.forEach((x, i) => {
+      const alts = (x.top_logprobs || []).filter((a) => a.token !== x.token).slice(0, 4).map((a) => JSON.stringify(a.token) + " " + Math.exp(a.logprob).toFixed(3)).join(", ");
+      const tr = rowOf([i + 1, JSON.stringify(x.token), Math.exp(x.logprob).toFixed(3), alts]);
+      tr.children[1].className = "tok";
+      tb.appendChild(tr);
+    });
+    w.appendChild(tb); det.appendChild(w); out.appendChild(det);
+  }
+  const raw = el("details");
+  raw.appendChild(el("summary", {}, "Raw chat request and response"));
+  raw.appendChild(el("pre", {}, "request " + JSON.stringify(runData.chat.request, null, 1) + "\n\nresponse " + JSON.stringify(res, null, 1)));
+  out.appendChild(raw);
+}
+function renderCompare(runData, out) {
+  const d = runData.response.results[0], c = chatValues(runData) || {};
+  const dt = runData.response.timings.total_ms, ct = runData.chat.response.timings ? runData.chat.response.timings.prompt_ms + runData.chat.response.timings.predicted_ms : runData.chat.round_trip_ms;
+  out.appendChild(el("h2", { style: "margin-top: 8px" }, "Comparison"));
+  const cols = el("div", { className: "cols" });
+  const a = el("div"); a.appendChild(el("h3", {}, "Decision")); a.appendChild(el("div", { className: "big" }, ms(dt))); a.appendChild(el("div", { className: "hint" }, "scores all values, probability per field"));
+  const b = el("div"); b.appendChild(el("h3", {}, "Chat with json_schema")); b.appendChild(el("div", { className: "big" }, ms(ct))); b.appendChild(el("div", { className: "hint" }, "generates the JSON token by token"));
+  cols.appendChild(a); cols.appendChild(b); out.appendChild(cols);
+  const w = el("div", { className: "table-wrap" }), tb = el("table");
+  tb.appendChild(rowOf(["field", "decision", "p", "chat", ""], "th"));
+  let same = 0;
+  for (const [name, f] of Object.entries(d.fields)) {
+    const eq = JSON.stringify(f.value) === JSON.stringify(c[name]);
+    same += eq;
+    const tr = rowOf([name, show(f.value) + range(f), f.probability.toFixed(3), c[name] === undefined ? "-" : show(c[name]), eq ? "same" : "differs"]);
+    tr.lastChild.className = eq ? "same" : "diff";
+    tb.appendChild(tr);
+  }
+  w.appendChild(tb); out.appendChild(w);
+  out.appendChild(el("p", { className: "hint" }, same + " of " + Object.keys(d.fields).length + " fields agree; decision took " + (ct / Math.max(dt, 1)).toFixed(1) + "x less server time than chat."));
+  renderSideBySide(runData, out);
+}
+function promptPre(text, tail) {
+  const pre = el("pre");
+  text.split("<image>").forEach((part, i, all) => {
+    pre.appendChild(document.createTextNode(part));
+    if (i < all.length - 1) pre.appendChild(el("span", { className: "img" }, "[image " + (i + 1) + "]"));
+  });
+  if (tail) pre.appendChild(el("span", { className: "img" }, tail));
+  return pre;
+}
+function renderSideBySide(runData, out) {
+  const res = runData.response, r = res.results[0], tr = res.trace, ct = r.trace;
+  const chat = runData.chat, cres = chat.response, t = cres.timings || {};
+  out.appendChild(el("h2", { style: "margin-top: 16px" }, "Side by side: what goes in, what comes out"));
+  if (!tr || !ct) { out.appendChild(el("p", { className: "hint" }, "Enable trace for the side-by-side view.")); return; }
+  const grid = el("div", { className: "side" });
+  const row = (label, left, right) => {
+    grid.appendChild(el("div", { className: "lab" }, label));
+    for (const x of [left, right]) {
+      const c = el("div", { className: "cell" });
+      if (typeof x === "string") c.textContent = x; else c.appendChild(x);
+      grid.appendChild(c);
+    }
+  };
+  grid.appendChild(el("div"));
+  grid.appendChild(el("div", { className: "head" }, "Decision (new)"));
+  grid.appendChild(el("div", { className: "head" }, "Chat with json_schema (old)"));
+
+  // in: the rendered prompts
+  const decisionPrompt = tr.prompt_prefix + ct.prompt;
+  const fieldLines = tr.fields.map((f) => "\n  " + JSON.stringify(f.name) + ": <" + (f.values || f.candidates).join(" | ") + ">").join("");
+  row("In: prompt", promptPre(decisionPrompt, fieldLines + "\n  (each line scored on its own branch)"),
+      chat.prompt ? promptPre(chat.prompt, "<- the model writes from here") : "the template could not be rendered");
+
+  // constraint
+  const cons = el("div");
+  for (const f of tr.fields) cons.appendChild(el("div", {}, f.name + ": one of " + (f.values || f.candidates).length + " values"));
+  cons.appendChild(el("div", { className: "hint" }, "nothing else can come out; the JSON is built from the scores"));
+  const gram = el("div");
+  gram.appendChild(el("pre", {}, JSON.stringify(jsonSchemaOf(JSON.parse(runData.request ? JSON.stringify(runData.request.schema) : "{}")), null, 1)));
+  gram.appendChild(el("div", { className: "hint" }, "a grammar from this schema limits every generated token"));
+  row("Constraint", cons, gram);
+
+  // work
+  const imgs = ct.chunks.filter((c) => c.type === "image");
+  row("Work",
+      "prefill " + tr.prefix_tokens + " prefix tokens" + (tr.prefix_cached ? " (cached)" : "") + " + " + r.usage.context_tokens + " context tokens" +
+      (imgs.length ? " (" + imgs.map((c) => c.tokens + " image tokens on " + c.positions + " positions" + (c.cached ? ", cached" : "")).join("; ") + ")" : "") +
+      "; then " + tr.fields.length + " fields scored from position " + ct.position_fields + " in " + res.timings.rounds + " round(s), " + res.usage.scored_rows + " rows" + (res.usage.decoded_rows != null ? " (" + res.usage.decoded_rows + " decoded)" : "") + "",
+      "prompt " + (t.prompt_n || 0) + " tokens" + (t.cache_n ? " (+" + t.cache_n + " cached)" : "") + "; then " + (t.predicted_n || 0) + " tokens generated one after another");
+
+  // out
+  const dout = el("div");
+  for (const [n, f] of Object.entries(r.fields)) dout.appendChild(el("div", {}, n + " = " + show(f.value) + range(f) + "   p " + f.probability.toFixed(3) + (f.margin !== undefined ? "  margin " + f.margin.toFixed(3) : "")));
+  const cout = el("div");
+  cout.appendChild(el("pre", {}, cres.choices[0].message.content));
+  const lp = cres.choices[0].logprobs && cres.choices[0].logprobs.content;
+  if (lp) {
+    const low = lp.map((x) => [x.token, Math.exp(x.logprob)]).filter((x) => x[1] < 0.99);
+    cout.appendChild(el("div", { className: "hint" }, lp.length + " tokens; " + (low.length ? "below 0.99: " + low.map((x) => JSON.stringify(x[0]) + " " + x[1].toFixed(3)).join(", ") : "all at p >= 0.99")));
+  }
+  row("Out", dout, cout);
+
+  // time
+  const enc = res.timings.media_encode_ms || 0;
+  row("Time",
+      "image encode " + ms(enc) + ", prefill " + ms(Math.max(res.timings.prefill_ms - enc, 0)) + ", scoring " + ms(res.timings.scoring_ms) + " = " + ms(res.timings.total_ms),
+      "prompt incl. image " + ms(t.prompt_ms || 0) + ", generation " + ms(t.predicted_ms || 0) + " = " + ms((t.prompt_ms || 0) + (t.predicted_ms || 0)));
+  out.appendChild(grid);
+
+  // are the prompts really the same up to the answer?
+  if (chat.prompt) {
+    const dNoAnswer = decisionPrompt.endsWith("{\n") ? decisionPrompt.slice(0, -2) : decisionPrompt;
+    const same = dNoAnswer === chat.prompt;
+    out.appendChild(el("p", { className: "check " + (same ? "same" : "diff") },
+      same ? "Both prompts are identical up to the answer (system message from the " + chat.system_from + ")."
+           : "The prompts differ before the answer; compare them above."));
+  }
+}
+function render(runData) {
+  const out = $("out");
+  out.innerHTML = "";
+  const head = el("div", { className: "actions" });
+  head.style.marginTop = "0";
+  head.appendChild(el("h2", { style: "margin: 0 auto 0 0" }, "Result"));
+  const copy = el("button", { className: "ghost" }, "copy JSON");
+  copy.onclick = () => navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(runData, null, 2));
+  const dl = el("button", { className: "ghost" }, "download trace");
+  dl.onclick = () => {
+    const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(runData, null, 2)], { type: "application/json" })), download: "decision-trace.json" });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  head.appendChild(copy);
+  head.appendChild(dl);
+  out.appendChild(head);
+  if (runData.response && runData.chat) renderCompare(runData, out);
+  if (runData.response) {
+    if (runData.chat) out.appendChild(el("h2", { style: "margin-top: 16px" }, "Decision"));
+    renderDecision(runData, out);
+  }
+  if (runData.chat) renderChat(runData, out, !!runData.response);
+}
+function rowOf(cells, tag) {
+  const tr = el("tr");
+  for (const c of cells) tr.appendChild(el(tag || "td", {}, String(c)));
+  return tr;
+}
+
+// ---- history (this browser only)
+function thumbOf(url) {
+  return new Promise((ok) => {
+    if (!url) return ok("");
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = 120; c.height = 56;
+      const s = Math.max(120 / img.width, 56 / img.height);
+      c.getContext("2d").drawImage(img, (120 - img.width * s) / 2, (56 - img.height * s) / 2, img.width * s, img.height * s);
+      ok(c.toDataURL("image/jpeg", 0.7));
+    };
+    img.onerror = () => ok("");
+    img.src = url;
+  });
+}
+async function remember(runData) {
+  const h = load("dp.history", []);
+  h.unshift({ thumb: await thumbOf(images[0] && images[0].url), run: runData });
+  store("dp.history", h.slice(0, 10));
+  drawHistory();
+}
+function drawHistory() {
+  const h = load("dp.history", []), box = $("history");
+  if (!h.length) return;
+  box.innerHTML = "";
+  for (const entry of h) {
+    const b = el("button", { title: entry.run.at });
+    if (entry.thumb) b.appendChild(el("img", { src: entry.thumb, alt: "" }));
+    const d = entry.run.response ? entry.run.response.results[0].decision : (chatValues(entry.run) || {});
+    b.appendChild(el("span", {}, (entry.run.mode && entry.run.mode !== "decision" ? entry.run.mode + ": " : "") + Object.values(d).slice(0, 3).map((v) => JSON.stringify(v)).join(" ")));
+    b.onclick = () => { last = entry.run; render(entry.run); };
+    box.appendChild(b);
+  }
+}
+drawHistory();
+applyMode();
+</script>
+</body>
+</html>

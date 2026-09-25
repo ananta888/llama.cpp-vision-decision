@@ -1,0 +1,74 @@
+{
+ "decision_vs_chat": {
+  "decision_ms_median": 94.7,
+  "chat_json_schema_ms_median": 357.0,
+  "field_agreement": 1.0,
+  "decision_accuracy": 1.0,
+  "chat_accuracy": 1.0
+ },
+ "fields_scaling": [
+  {
+   "fields": 1,
+   "total_ms": 98.9,
+   "prefill_ms": 73.2,
+   "scoring_ms": 13.6,
+   "scored_rows": 5
+  },
+  {
+   "fields": 2,
+   "total_ms": 86.0,
+   "prefill_ms": 61.6,
+   "scoring_ms": 18.9,
+   "scored_rows": 10
+  },
+  {
+   "fields": 4,
+   "total_ms": 85.6,
+   "prefill_ms": 60.7,
+   "scoring_ms": 17.3,
+   "scored_rows": 20
+  },
+  {
+   "fields": 8,
+   "total_ms": 88.9,
+   "prefill_ms": 62.1,
+   "scoring_ms": 20.1,
+   "scored_rows": 40
+  },
+  {
+   "fields": 16,
+   "total_ms": 111.6,
+   "prefill_ms": 60.4,
+   "scoring_ms": 44.7,
+   "scored_rows": 81
+  }
+ ],
+ "multi_context": [
+  {
+   "images": 1,
+   "one_request_ms": 108.8,
+   "separate_requests_ms": 78.5
+  },
+  {
+   "images": 2,
+   "one_request_ms": 146.4,
+   "separate_requests_ms": 154.9
+  },
+  {
+   "images": 4,
+   "one_request_ms": 310.0,
+   "separate_requests_ms": 304.9
+  },
+  {
+   "images": 8,
+   "one_request_ms": 568.6,
+   "separate_requests_ms": 575.6
+  }
+ ],
+ "cache": {
+  "cold_ms": 95.3,
+  "warm_ms": 76.6,
+  "cached_tokens_warm": 116,
+  "media_encode_ms": 12.1
+ }
+}

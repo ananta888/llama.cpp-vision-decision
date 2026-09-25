@@ -1,0 +1,48 @@
+{
+ "shapes": {
+  "total_ms_median": {
+   "shared": 78.1,
+   "single": 77.5,
+   "chat": 303.8
+  },
+  "scoring_ms_median": {
+   "shared": 18.7,
+   "single": 18.6
+  },
+  "rows_scored_decoded": {
+   "shared": [
+    20,
+    14
+   ],
+   "single": [
+    20,
+    20
+   ]
+  },
+  "same_decision_shared_vs_single": 1.0,
+  "max_abs_probability_diff": 0.0416
+ },
+ "numeric": {
+  "total_ms_median": {
+   "shared": 302.0,
+   "single": 346.6,
+   "chat": 482.0
+  },
+  "scoring_ms_median": {
+   "shared": 231.8,
+   "single": 275.1
+  },
+  "rows_scored_decoded": {
+   "shared": [
+    801,
+    173
+   ],
+   "single": [
+    801,
+    801
+   ]
+  },
+  "same_decision_shared_vs_single": 0.975,
+  "max_abs_probability_diff": 0.0298
+ }
+}

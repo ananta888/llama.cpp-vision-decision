@@ -198,6 +198,7 @@ bool server_http_context::init(const common_params & params) {
         std::unordered_set<std::string> endpoints {
             "/health",
             "/v1/health",
+            "/decision-playground", // static page; its /v1/decision calls still need the key
         };
         endpoints.insert(frontend_paths.begin(), frontend_paths.end());
         return endpoints;

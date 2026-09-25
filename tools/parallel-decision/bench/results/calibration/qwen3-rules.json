@@ -1,0 +1,10 @@
+[
+ {
+  "field": "count",
+  "escalate_when": {
+   "shape": "square"
+  },
+  "accepted_accuracy": 0.938,
+  "accepted": 16
+ }
+]

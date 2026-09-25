@@ -1,0 +1,482 @@
+{
+ "n": 160,
+ "wall_s": 0.0,
+ "mean_per_decision_ms": 1459.0,
+ "fields": {
+  "shape": {
+   "accuracy": 1.0,
+   "mean_confidence": 1.0,
+   "nll": 0.0,
+   "ece": 0.0,
+   "fitted_temperature": 0.25,
+   "nll_fitted": 0.0,
+   "ece_fitted": 0.0,
+   "calibration": {
+    "temperature": 0.25,
+    "threshold": 0.9999,
+    "cv_accepted_accuracy": 1.0,
+    "cv_coverage": 0.9875,
+    "accepted_accuracy": 1.0,
+    "coverage": 1.0,
+    "usable": true
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 43,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=triangle": {
+     "n": 47,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 29,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 34,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 24,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 38,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=False": {
+     "n": 85,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 75,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    }
+   }
+  },
+  "color": {
+   "accuracy": 1.0,
+   "mean_confidence": 0.9894,
+   "nll": 0.0109,
+   "ece": 0.0106,
+   "fitted_temperature": 0.25,
+   "nll_fitted": 0.0,
+   "ece_fitted": 0.0,
+   "calibration": {
+    "temperature": 0.25,
+    "threshold": 0.9999,
+    "cv_accepted_accuracy": 1.0,
+    "cv_coverage": 1.0,
+    "accepted_accuracy": 1.0,
+    "coverage": 1.0,
+    "usable": true
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 43,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=triangle": {
+     "n": 47,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 35,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 29,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 34,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 24,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 38,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=False": {
+     "n": 85,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 75,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    }
+   }
+  },
+  "count": {
+   "accuracy": 0.925,
+   "mean_confidence": 0.9609,
+   "nll": 0.2252,
+   "ece": 0.0438,
+   "fitted_temperature": 1.51,
+   "nll_fitted": 0.1998,
+   "ece_fitted": 0.0204,
+   "calibration": {
+    "temperature": 1.51,
+    "threshold": 0.9212,
+    "cv_accepted_accuracy": 0.9907,
+    "cv_coverage": 0.6687,
+    "accepted_accuracy": 0.9921,
+    "coverage": 0.7937,
+    "usable": true
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 43,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 35,
+     "coverage": 0.457,
+     "accepted_accuracy": 0.938,
+     "below_target": true
+    },
+    "shape=triangle": {
+     "n": 47,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 35,
+     "coverage": 0.6,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 0.8,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 0.909,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 0.862,
+     "accepted_accuracy": 0.96,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 0.6,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 0.818,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 35,
+     "coverage": 0.6,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 29,
+     "coverage": 1.0,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 34,
+     "coverage": 0.676,
+     "accepted_accuracy": 0.957,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 24,
+     "coverage": 0.958,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 38,
+     "coverage": 0.816,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=False": {
+     "n": 85,
+     "coverage": 0.918,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 75,
+     "coverage": 0.653,
+     "accepted_accuracy": 0.98,
+     "below_target": false
+    }
+   }
+  },
+  "dark_background": {
+   "accuracy": 0.9375,
+   "mean_confidence": 0.9485,
+   "nll": 0.2061,
+   "ece": 0.0699,
+   "fitted_temperature": 1.428,
+   "nll_fitted": 0.194,
+   "ece_fitted": 0.0685,
+   "calibration": {
+    "temperature": 1.428,
+    "threshold": 0.9316,
+    "cv_accepted_accuracy": 0.9811,
+    "cv_coverage": 0.6625,
+    "accepted_accuracy": 1.0,
+    "coverage": 0.6562,
+    "usable": true
+   },
+   "groups": {
+    "shape=circle": {
+     "n": 43,
+     "coverage": 0.744,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=square": {
+     "n": 35,
+     "coverage": 0.429,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=triangle": {
+     "n": 47,
+     "coverage": 0.936,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "shape=unknown": {
+     "n": 35,
+     "coverage": 0.4,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=blue": {
+     "n": 30,
+     "coverage": 0.567,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=green": {
+     "n": 33,
+     "coverage": 0.758,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=red": {
+     "n": 29,
+     "coverage": 0.69,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=unknown": {
+     "n": 35,
+     "coverage": 0.4,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "color=yellow": {
+     "n": 33,
+     "coverage": 0.879,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=0": {
+     "n": 35,
+     "coverage": 0.4,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=1": {
+     "n": 29,
+     "coverage": 0.828,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=2": {
+     "n": 34,
+     "coverage": 0.618,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=3": {
+     "n": 24,
+     "coverage": 0.792,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "count=4": {
+     "n": 38,
+     "coverage": 0.711,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=False": {
+     "n": 85,
+     "coverage": 0.471,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    },
+    "dark_background=True": {
+     "n": 75,
+     "coverage": 0.867,
+     "accepted_accuracy": 1.0,
+     "below_target": false
+    }
+   }
+  }
+ },
+ "schema_out": "/tmp/claude-1000/-home-krusty-llama-cpp-vision-decision/0ebf413e-89bf-4e00-b7d5-5f52cb217987/scratchpad/q3_schema.json",
+ "rules": [
+  {
+   "field": "count",
+   "escalate_when": {
+    "shape": "square"
+   },
+   "accepted_accuracy": 0.938,
+   "accepted": 16
+  }
+ ]
+}
