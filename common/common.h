@@ -449,6 +449,7 @@ struct common_params {
     int32_t n_seq_decision        =     0; // sequences reserved for llama-server's /decision endpoint (0 = disabled)
     int32_t decision_media_cache  =   256; // MiB of encoded /decision media kept across requests (0 = off)
     int32_t decision_max_media    =    16; // most images in one /decision request
+    int32_t decision_ctx_cache    =     0; // of the decision sequences, how many keep decoded contexts for later requests
     int32_t n_sequences           =     1; // number of sequences to decode
     int32_t n_outputs_max         =     0; // max outputs in a batch (0 = n_batch)
     int32_t n_outputs_max_per_seq =     1; // max outputs per sequence

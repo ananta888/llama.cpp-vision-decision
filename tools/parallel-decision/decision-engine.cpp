@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <stdexcept>
@@ -238,15 +239,18 @@ struct decision_field {
 
 // ---------------------------------------------------------------- engine
 
-engine::engine(llama_context * ctx, llama_seq_id seq_base, int n_seqs)
+engine::engine(llama_context * ctx, llama_seq_id seq_base, int n_seqs, int n_ctx_cache)
     : ctx(ctx), vocab(llama_model_get_vocab(llama_get_model(ctx))), mem(llama_get_memory(ctx)),
-      seq_snap(seq_base), seq_pool(seq_base + 1), n_pool(n_seqs - 1) {
+      seq_snap(seq_base), seq_pool(seq_base + 1), n_pool(n_seqs - 1 - n_ctx_cache) {
     // recurrent state is one per sequence, not per cell: branches can neither share tokens nor be cut
     const llama_model * model = llama_get_model(ctx);
     per_cell = !llama_model_is_recurrent(model) && !llama_model_is_hybrid(model);
-    if (n_seqs < 3) {
-        throw std::invalid_argument("a decision engine needs at least 3 sequences");
+    if (n_ctx_cache < 0 || n_seqs - n_ctx_cache < 3) {
+        throw std::invalid_argument("a decision engine needs at least 3 sequences besides its context cache");
     }
+    // the context cache takes the last sequences, after the pool
+    this->n_ctx_cache = n_ctx_cache;
+    seq_cache0        = seq_pool + n_pool;
 }
 
 tokens_t engine::tokenize(const std::string & text, bool add_special) const {
@@ -655,6 +659,66 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
 
     std::vector<llama_pos> pos_next(contexts.size());
 
+    // context cache: a context decoded by an earlier request after the same prefix is copied, not decoded
+    const bool use_ctx_cache = opt.cache_context && n_ctx_cache > 0;
+    auto cacheable = [&](size_t i) {
+        return use_ctx_cache && !(contexts[i].prefill && contexts[i].cache_key.empty());
+    };
+    auto find_entry = [&](size_t i) -> ctx_entry * {
+        if (!cacheable(i)) {
+            return nullptr;
+        }
+        for (auto & e : ctx_cache) {
+            if (e.shared == shared && (contexts[i].prefill ? e.key == contexts[i].cache_key : e.key.empty() && e.toks == prefixes[i])) {
+                return &e;
+            }
+        }
+        return nullptr;
+    };
+    auto oldest_entry = [&]() {
+        size_t k = 0;
+        for (size_t j = 1; j < ctx_cache.size(); ++j) {
+            if (ctx_cache[j].used < ctx_cache[k].used) {
+                k = j;
+            }
+        }
+        return k;
+    };
+    auto drop_entry = [&](size_t k) {
+        llama_memory_seq_rm(mem, ctx_cache[k].seq, -1, -1);
+        ctx_cache.erase(ctx_cache.begin() + (long) k);
+    };
+    // the cache holds its contexts' cells (and its prefix, if not the current one); the oldest entries go
+    // when a group needs the room
+    auto make_room = [&](size_t need) {
+        while (!ctx_cache.empty()) {
+            size_t held = 0;
+            for (const auto & e : ctx_cache) {
+                held += e.n_tokens + (e.shared == shared ? 0 : e.shared.size());
+            }
+            if (need + held <= n_kv) {
+                break;
+            }
+            drop_entry(oldest_entry());
+        }
+    };
+    auto store_entry = [&](size_t i, llama_seq_id trunk) {
+        if (!cacheable(i)) {
+            return;
+        }
+        if ((int) ctx_cache.size() >= n_ctx_cache) {
+            drop_entry(oldest_entry());
+        }
+        llama_seq_id seq = seq_cache0;
+        while (std::any_of(ctx_cache.begin(), ctx_cache.end(), [&](const ctx_entry & e) { return e.seq == seq; })) {
+            ++seq;
+        }
+        llama_memory_seq_rm(mem, seq, -1, -1);
+        llama_memory_seq_cp(mem, trunk, seq, -1, -1);
+        ctx_cache.push_back({ shared, contexts[i].prefill ? tokens_t() : prefixes[i], contexts[i].prefill ? contexts[i].cache_key : std::string(),
+                              seq, pos_next[i], ctx_tokens[i], ++use_clock });
+    };
+
     // each context in a group holds one trunk sequence; the rest of the pool scores branches
     const size_t per_group = std::clamp<size_t>(n_pool / (1 + branches), 1, contexts.size());
     // at most one prefilled (media) context per group, decoded first right after the prefix: media decoded
@@ -677,9 +741,23 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         const auto tp = std::chrono::steady_clock::now();
         const llama_pos pos_ctx = (llama_pos) shared.size();
         std::vector<prompt_part> parts;
+        std::vector<bool> hit(n_group, false);
+        size_t need = shared.size() + std::min<size_t>(n_batch, (size_t) total * n_group);
+        for (size_t i = 0; i < n_group; ++i) {
+            need += find_entry(g0 + i) ? 0 : ctx_tokens[g0 + i];
+        }
+        make_room(need);
         for (size_t i = 0; i < n_group; ++i) {
             const llama_seq_id trunk = seq_pool + (llama_seq_id) i;
             llama_memory_seq_rm(mem, trunk, -1, -1);
+            if (ctx_entry * e = find_entry(g0 + i)) {
+                llama_memory_seq_cp(mem, e->seq, trunk, -1, -1);
+                pos_next[g0 + i] = e->pos_next;
+                e->used = ++use_clock;
+                hit[i] = true;
+                out.items[g0 + i].context_cached = true;
+                continue;
+            }
             if (!shared.empty()) {
                 llama_memory_seq_cp(mem, seq_snap, trunk, -1, -1);
             }
@@ -689,7 +767,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             }
         }
         for (size_t i = 0; i < n_group; ++i) {
-            if (contexts[g0 + i].prefill) {
+            if (contexts[g0 + i].prefill && !hit[i]) {
                 pos_next[g0 + i] = contexts[g0 + i].prefill(seq_pool + (llama_seq_id) i, pos_ctx);
                 if (pos_next[g0 + i] <= pos_ctx) {
                     throw std::runtime_error("the context prefill did not advance the position");
@@ -698,6 +776,11 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         }
         decode_parts(parts);
         llama_synchronize(ctx); // llama_decode is asynchronous: wait for the prefill so its time isn't billed to scoring
+        for (size_t i = 0; i < n_group; ++i) {
+            if (!hit[i]) {
+                store_entry(g0 + i, seq_pool + (llama_seq_id) i);
+            }
+        }
         out.prefill_ms += ms_since(tp);
 
         // round 1 carries every tree node (with pruning: each tree's root) and each greedy field's first
