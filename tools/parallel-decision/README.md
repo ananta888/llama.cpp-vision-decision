@@ -312,13 +312,30 @@ last digits (kernels depend on the batch size): up to 4e-6 with Qwen3-VL; decisi
   shows it (ECE 0.42), and a fitted temperature or an abstain rule catches it.
 - A warm prefix and image cache halve a repeated request (Qwen3-VL, 2 images + 1 text: 6.8 s cold, 3.3 s warm).
 
-Branches share their common tokens: all branches of a field start with the field suffix, and the branches of a number
-share its leading digits. The branches of one batch form a trie, each trie token is decoded once and belongs to the
-sequences of all branches below it. `usage.scored_rows` counts the rows of the branches, `usage.decoded_rows` the rows
-decoded. A body-size schema (5 checks, 7 nullable sizes, Qwen3-VL-2B Q8_0, CPU, 16 decision sequences) scores 484
-rows with 126 decoded, and scoring takes 4.1 s instead of 10.0 s (best of 5, interleaved), with the same decisions.
-Logits match decoding each branch on its own sequence exactly; an old-style batch with a separate copy of every
-branch has a different batch shape and differs on the CPU backend by up to 0.3 in the logits.
+Branches share their common tokens (`share_tokens`, on by default): all branches of a field start with the field
+suffix, and the branches of a number share its leading digits. The branches of one batch form a trie, each trie token
+is decoded once and belongs to the sequences of all branches below it. `usage.scored_rows` counts the rows of the
+branches, `usage.decoded_rows` the rows decoded.
+
+`bench/bench_share.py`, Qwen3-VL-2B Q8_0, 8 images of `bench/shapes.py`, `--decision-media-cache 0`, median per image
+(total / scoring). "numeric" asks 4 nullable pixel values (0-249) and a percentage, in tree mode:
+
+| backend | schema | shared tokens | own copy per branch | chat + json_schema | rows scored / decoded |
+|---|---|---|---|---|---|
+| CPU, 128 seqs | shapes (4 fields) | 1.14 s / 0.13 s | 1.19 s / 0.16 s | 2.76 s | 20 / 14 |
+| CPU, 128 seqs | numeric (5 fields) | 4.27 s / 1.98 s | 12.41 s / 10.14 s | 3.33 s | 801 / 125 |
+| GPU, 16 seqs | numeric (5 fields) | 302 ms / 232 ms | 347 ms / 275 ms | 482 ms | 801 / 173 |
+| GPU, 128 seqs | shapes (4 fields) | 77 ms / 19 ms | 80 ms / 20 ms | 313 ms | 20 / 14 |
+| GPU, 128 seqs | numeric (5 fields) | 165 ms / 92 ms | 240 ms / 168 ms | 490 ms | 801 / 125 |
+
+- Sharing pays off for numbers: scoring is 5x faster on the CPU and 1.8x on the GPU.
+- In tree mode every trie node of a number is one output, and one decode takes as many outputs as there are decision
+  sequences. Wide numeric fields want many sequences (128 costs little on a plain-attention model); with 16 the numeric
+  schema takes several rounds.
+- Shared and own-copy scoring decode the same tokens in a different batch shape. On the CPU backend the shared logits
+  equal decoding every branch on its own sequence exactly; on CUDA both layouts differ from that by up to about 0.5 in
+  the logits (kernels depend on the batch shape), probabilities by up to 0.04, and near-ties can flip (95-100% of the
+  decisions were the same).
 
 ## Checking a model
 
