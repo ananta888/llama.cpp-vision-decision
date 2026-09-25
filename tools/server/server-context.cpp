@@ -4039,8 +4039,14 @@ private:
                 }
             }
 
-            // retry with half the batch size to try to find a free slot in the KV cache
-            if (!try_clear_idle_slots()) {
+            // retry with half the batch size to try to find a free slot in the KV cache; the decision
+            // engine's cached contexts and prefix go before the batch shrinks
+            bool freed = try_clear_idle_slots();
+            if (!freed && decision_engine && decision_engine->release_cached()) {
+                SRV_WRN("%s", "released KV cells held for /decision\n");
+                freed = true;
+            }
+            if (!freed) {
                 n_batch /= 2;
             }
 

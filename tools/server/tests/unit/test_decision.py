@@ -415,3 +415,16 @@ def test_decision_context_first_layout():
     assert [r["decision"] for r in fresh["results"]] == [r["decision"] for r in second["results"]]
     res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": ctx, "layout": "sideways"})
     assert res.status_code == 400
+
+
+def test_decision_cache_yields_to_chat():
+    global server
+    server.decision_ctx_cache = 2
+    server.n_ctx = 1024
+    server.start()
+    long_text = "The quick brown fox jumps over the lazy dog. " * 50  # ~500 tokens
+    body = decide({"schema": SCHEMA, "contexts": [long_text], "layout": "context_first"})
+    assert body["usage"]["contexts_cached"] == 0
+    # a chat prompt that only fits when the cached decision context is given back
+    res = server.make_request("POST", "/completion", data={"prompt": long_text + " And then", "n_predict": 4, "cache_prompt": False})
+    assert res.status_code == 200, res.body
