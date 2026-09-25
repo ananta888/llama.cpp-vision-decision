@@ -2666,6 +2666,7 @@ private:
         usage["cached_tokens"]  = (long long) (b.cache_hit ? b.shared_tokens : 0);
         usage["context_tokens"] = (long long) context_tokens;
         usage["scored_rows"]    = b.rows;
+        usage["decoded_rows"]   = b.rows_decoded;
         if (!enc.media.empty()) {
             usage["media_chunks"] = (long long) enc.media.size();
             usage["media_tokens"] = (long long) n_media_tokens;

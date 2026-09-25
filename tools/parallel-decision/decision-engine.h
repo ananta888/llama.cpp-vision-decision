@@ -75,6 +75,7 @@ struct batch_result {
     bool   cache_hit     = false;
     size_t shared_tokens = 0;
     int    rows          = 0;
+    int    rows_decoded  = 0; // rows actually decoded: branches share their common tokens
     int    rounds        = 0;
     double prefill_ms    = 0;
     double scoring_ms    = 0;
@@ -119,6 +120,7 @@ class engine {
     llama_seq_id        seq_snap, seq_pool;
     int                 n_pool;
     tokens_t            cached;
+    int                 rows_decoded = 0; // branch rows decoded by the last decide_batch (shared tokens once)
 
     tokens_t tokenize(const std::string & text, bool add_special) const;
     void     decode_parts(const std::vector<prompt_part> & parts);

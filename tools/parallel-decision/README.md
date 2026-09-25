@@ -311,6 +311,14 @@ last digits (kernels depend on the batch size): up to 4e-6 with Qwen3-VL; decisi
   shows it (ECE 0.42), and a fitted temperature or an abstain rule catches it.
 - A warm prefix and image cache halve a repeated request (Qwen3-VL, 2 images + 1 text: 6.8 s cold, 3.3 s warm).
 
+Branches share their common tokens: all branches of a field start with the field suffix, and the branches of a number
+share its leading digits. The branches of one batch form a trie, each trie token is decoded once and belongs to the
+sequences of all branches below it. `usage.scored_rows` counts the rows of the branches, `usage.decoded_rows` the rows
+decoded. A body-size schema (5 checks, 7 nullable sizes, Qwen3-VL-2B Q8_0, CPU, 16 decision sequences) scores 484
+rows with 126 decoded, and scoring takes 4.1 s instead of 10.0 s (best of 5, interleaved), with the same decisions.
+Logits match decoding each branch on its own sequence exactly; an old-style batch with a separate copy of every
+branch has a different batch shape and differs on the CPU backend by up to 0.3 in the logits.
+
 ## Checking a model
 
 `bench/equivalence.py` compares the probabilities of an image decision with the next-token distribution of

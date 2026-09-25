@@ -246,50 +246,117 @@ void engine::clear_pool() {
     }
 }
 
-// Score each branch as its own sequence forked from its trunk; return each branch's last-token
-// logits restricted to its candidate tokens. Groups are bounded by free sequences and batch rows.
+// Score each branch forked from its trunk; return each branch's last-token logits restricted to its
+// candidate tokens. Branches of a trunk that start with the same tokens (the field suffix, shared
+// digits of numbers) share them: the branches form a trie, each trie token is decoded once and
+// belongs to every sequence below it, with one sequence per trie leaf. Groups are bounded by free
+// sequences (outputs) and batch rows.
 std::vector<std::vector<float>> engine::score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free) {
+    struct node {
+        llama_token      tok;
+        llama_pos        pos;
+        llama_seq_id     trunk;
+        int              parent;
+        std::vector<int> kids;
+        bool             out = false;
+    };
     std::vector<std::vector<float>> result(branches.size());
     const int max_rows = (int) llama_n_batch(ctx);
     size_t start = 0;
     while (start < branches.size()) {
-        size_t end  = start;
-        int    rows = 0;
-        while (end < branches.size() && (int) (end - start) < n_free && rows + (int) branches[end].toks.size() <= max_rows) {
-            rows += (int) branches[end].toks.size();
-            ++end;
+        std::vector<node> nodes;
+        std::vector<std::pair<llama_seq_id, int>> roots; // (trunk, first node of a path)
+        std::vector<int> end_node;
+        int n_out = 0;
+        size_t end = start;
+        for (; end < branches.size(); ++end) {
+            const branch & b = branches[end];
+            // follow the tokens that are already in the trie
+            int cur = -1;
+            size_t i = 0;
+            for (; i < b.toks.size(); ++i) {
+                int next = -1;
+                if (cur < 0) {
+                    for (const auto & [t, n] : roots) {
+                        if (t == b.trunk && nodes[n].tok == b.toks[i]) {
+                            next = n;
+                        }
+                    }
+                } else {
+                    for (int n : nodes[cur].kids) {
+                        if (nodes[n].tok == b.toks[i]) {
+                            next = n;
+                        }
+                    }
+                }
+                if (next < 0) {
+                    break;
+                }
+                cur = next;
+            }
+            // every output row counts (the context sizes its outputs by the decision sequences);
+            // leaves, which need a sequence each, are never more than outputs
+            const int new_rows = (int) (b.toks.size() - i);
+            const int new_out  = new_rows > 0 || !nodes[cur].out ? 1 : 0;
+            if (n_out + new_out > n_free || (int) nodes.size() + new_rows > max_rows) {
+                break;
+            }
+            for (; i < b.toks.size(); ++i) {
+                nodes.push_back({ b.toks[i], b.pos0 + (llama_pos) i, b.trunk, cur, {} });
+                const int n = (int) nodes.size() - 1;
+                if (cur < 0) {
+                    roots.push_back({ b.trunk, n });
+                } else {
+                    nodes[cur].kids.push_back(n);
+                }
+                cur = n;
+            }
+            nodes[cur].out = true;
+            n_out += new_out;
+            end_node.push_back(cur);
         }
         if (end == start) {
             throw std::runtime_error("a decision suffix exceeds the batch size");
         }
-        llama_batch batch = llama_batch_init(rows, 0, 1);
-        std::vector<int> out_idx;
-        for (size_t b = start; b < end; ++b) {
-            const llama_seq_id seq = first + (llama_seq_id) (b - start);
-            llama_memory_seq_rm(mem, seq, -1, -1);
-            llama_memory_seq_cp(mem, branches[b].trunk, seq, -1, -1);
-            const auto & toks = branches[b].toks;
-            for (size_t i = 0; i < toks.size(); ++i) {
-                const bool last = i + 1 == toks.size();
-                if (last) {
-                    out_idx.push_back(batch.n_tokens);
-                }
-                common_batch_add(batch, toks[i], branches[b].pos0 + (llama_pos) i, { seq }, last);
+
+        // one sequence per leaf; a token belongs to the sequences of all leaves below it
+        std::vector<std::vector<llama_seq_id>> seqs(nodes.size());
+        std::vector<llama_seq_id> leaves;
+        for (int n = 0; n < (int) nodes.size(); ++n) {
+            if (!nodes[n].kids.empty()) {
+                continue;
             }
+            const llama_seq_id seq = first + (llama_seq_id) leaves.size();
+            leaves.push_back(seq);
+            llama_memory_seq_rm(mem, seq, -1, -1);
+            llama_memory_seq_cp(mem, nodes[n].trunk, seq, -1, -1);
+            for (int m = n; m >= 0; m = nodes[m].parent) {
+                seqs[m].push_back(seq);
+            }
+        }
+        llama_batch batch = llama_batch_init((int) nodes.size(), 0, (int) leaves.size());
+        for (size_t n = 0; n < nodes.size(); ++n) {
+            common_batch_add(batch, nodes[n].tok, nodes[n].pos, seqs[n], nodes[n].out);
         }
         const int rc = llama_decode(ctx, batch);
         llama_batch_free(batch);
         if (rc != 0) {
+            for (llama_seq_id seq : leaves) {
+                llama_memory_seq_rm(mem, seq, -1, -1);
+            }
             throw std::runtime_error(rc == 1 ? "no free KV cache space for the decision branches"
                                              : "llama_decode failed on the decision branches (" + std::to_string(rc) + ")");
         }
         for (size_t b = start; b < end; ++b) {
-            const float * logits = llama_get_logits_ith(ctx, out_idx[b - start]);
+            const float * logits = llama_get_logits_ith(ctx, end_node[b - start]);
             for (llama_token t : branches[b].cands) {
                 result[b].push_back(logits[t]);
             }
-            llama_memory_seq_rm(mem, first + (llama_seq_id) (b - start), -1, -1);
         }
+        for (llama_seq_id seq : leaves) {
+            llama_memory_seq_rm(mem, seq, -1, -1);
+        }
+        rows_decoded += (int) nodes.size();
         start = end;
     }
     return result;
@@ -417,6 +484,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         }
     }
 
+    rows_decoded = 0;
     const auto t0 = std::chrono::steady_clock::now();
     out.cache_hit = prepare_prefix(shared, opt.allow_cache);
     out.prefill_ms += ms_since(t0);
@@ -561,6 +629,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         out.scoring_ms += ms_since(ts);
     }
     guard.armed = false;
+    out.rows_decoded = rows_decoded;
     return out;
 }
 
