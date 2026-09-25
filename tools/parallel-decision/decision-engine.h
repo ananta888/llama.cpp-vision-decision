@@ -131,6 +131,7 @@ class engine {
     tokens_t            cached;
     int                 rows_decoded = 0; // branch rows decoded by the last decide_batch (shared tokens once)
     std::vector<kept_path> kept;          // paths kept for the next round of score_branches
+    bool                per_cell = true;  // memory is per KV cell (no recurrent layers): branches may share tokens
 
     tokens_t tokenize(const std::string & text, bool add_special) const;
     void     decode_parts(const std::vector<prompt_part> & parts);

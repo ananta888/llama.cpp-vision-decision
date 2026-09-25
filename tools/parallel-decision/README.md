@@ -127,7 +127,7 @@ Every field also takes `temperature` and `abstain` (`x-temperature` / `x-abstain
 | `mode` | `auto` | `tree` scores every divergence node and returns exact probabilities; `greedy` walks the trie; `auto` picks tree up to `tree_max` values |
 | `tree_max` | 128 | per-field switch between tree and greedy |
 | `cache_prompt` | true | reuse the cached instructions + schema prefix |
-| `share_tokens` | true | decode tokens that branches have in common (field suffix, leading digits) once; `false` gives every branch its own copy, as before |
+| `share_tokens` | true | decode tokens that branches have in common (field suffix, leading digits) once; `false` gives every branch its own copy, as before. Off for models with recurrent layers, whose state is per sequence |
 | `tree_prune` | 0 | tree fields: open a trie node only when it is reached with at least this probability; a subtree left closed spreads its probability evenly over its values. More rounds, fewer rows |
 | `compact_ranges` | false | describe numeric fields in the prompt as a range (`integers from 0 to 249, or null`) instead of listing every value |
 | `temperature` | 1.0 | default temperature of every field |

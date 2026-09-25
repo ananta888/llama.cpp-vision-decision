@@ -241,6 +241,9 @@ struct decision_field {
 engine::engine(llama_context * ctx, llama_seq_id seq_base, int n_seqs)
     : ctx(ctx), vocab(llama_model_get_vocab(llama_get_model(ctx))), mem(llama_get_memory(ctx)),
       seq_snap(seq_base), seq_pool(seq_base + 1), n_pool(n_seqs - 1) {
+    // recurrent state is one per sequence, not per cell: branches can neither share tokens nor be cut
+    const llama_model * model = llama_get_model(ctx);
+    per_cell = !llama_model_is_recurrent(model) && !llama_model_is_hybrid(model);
     if (n_seqs < 3) {
         throw std::invalid_argument("a decision engine needs at least 3 sequences");
     }
@@ -334,6 +337,7 @@ std::vector<std::vector<float>> engine::score_branches(const std::vector<branch>
         llama_pos    pos0;
         tokens_t     prefix; // branch tokens already in src
     };
+    share = share && per_cell;
     const std::vector<kept_path> prev = std::move(kept);
     kept.clear();
     std::vector<bool> busy(n_free, false);
