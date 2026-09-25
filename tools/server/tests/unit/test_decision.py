@@ -368,3 +368,28 @@ def test_decision_cpu_options():
     for bad in ({"tree_prune": 1.0}, {"compact_ranges": "yes"}, {"schema": {"size": {**size, "step": 0}}}):
         res = server.make_request("POST", "/v1/decision", data={**req, **bad})
         assert res.status_code == 400
+
+
+def test_decision_context_cache():
+    global server
+    server.decision_ctx_cache = 2
+    server.start()
+    req = {"schema": SCHEMA, "contexts": ["A photo of a small cat on a sofa.", image_context([0])], "mode": "tree", "return_probs": True}
+    first = decide(req)
+    assert first["usage"]["contexts_cached"] == 0
+    again = decide(req)
+    # both contexts come from the cache: nothing decoded, no image encoded, the same numbers
+    assert again["usage"]["contexts_cached"] == 2
+    assert [r["usage"]["context_cached"] for r in again["results"]] == [True, True]
+    assert again["usage"].get("media_cached", 0) == 0 and again["timings"]["media_encode_ms"] == 0
+    for a, b in zip(first["results"], again["results"]):
+        for name in SCHEMA:
+            pa = [c["probability"] for c in a["fields"][name]["probs"]]
+            pb = [c["probability"] for c in b["fields"][name]["probs"]]
+            assert max(abs(x - y) for x, y in zip(pa, pb)) < 1e-4
+    # other instructions, or cache_context off: decoded again
+    assert decide({**req, "instructions": "Be brief."})["usage"]["contexts_cached"] == 0
+    assert decide({**req, "cache_context": False})["usage"]["contexts_cached"] == 0
+    # a third context evicts the oldest of the two slots
+    decide({**req, "contexts": ["A frog in a pond."]})
+    assert decide({**req, "contexts": ["A frog in a pond."]})["usage"]["contexts_cached"] == 1

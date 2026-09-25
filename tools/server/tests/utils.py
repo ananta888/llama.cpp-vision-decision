@@ -81,6 +81,7 @@ class ServerProcess:
     decision_seqs: int | None = None
     decision_media_cache: int | None = None
     decision_max_media: int | None = None
+    decision_ctx_cache: int | None = None
     ctk: str | None = None
     ctv: str | None = None
     fa: str | None = None
@@ -227,6 +228,8 @@ class ServerProcess:
             server_args.extend(["--decision-media-cache", self.decision_media_cache])
         if self.decision_max_media:
             server_args.extend(["--decision-max-media", self.decision_max_media])
+        if self.decision_ctx_cache is not None:
+            server_args.extend(["--decision-ctx-cache", self.decision_ctx_cache])
         if self.ctk:
             server_args.extend(["-ctk", self.ctk])
         if self.ctv:

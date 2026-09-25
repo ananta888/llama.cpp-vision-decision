@@ -31,6 +31,7 @@ struct context_input {
     std::string text;
     std::function<llama_pos(llama_seq_id seq, llama_pos pos0)> prefill;
     size_t n_tokens = 0; // prefill contexts: tokens the caller decodes
+    std::string cache_key; // prefill contexts: identifies the context for the context cache (empty: not cached)
 };
 
 // One field as the scorer sees it: the text before its value and the allowed value texts.
@@ -47,6 +48,7 @@ struct options {
     bool        allow_cache    = true;   // reuse the cached static prefix when it matches
     bool        share_tokens   = true;   // decode tokens that branches have in common once (a trie)
     float       tree_prune     = 0.0f;   // tree fields: open a trie node only when reached with at least this probability
+    bool        cache_context  = true;   // keep decoded contexts for later requests (engine built with context cache slots)
 };
 
 struct field_result {
@@ -64,6 +66,7 @@ struct result {
     size_t context_tokens = 0;
     llama_pos pos_fields  = 0; // position the field branches start at
     int    group          = 0; // index of the group of contexts decoded together
+    bool   context_cached = false; // the context came from the context cache, nothing was decoded for it
     int    rows           = 0;
     int    rounds         = 0;
     double prefill_ms     = 0;
@@ -88,7 +91,8 @@ struct batch_result {
 // flight, then branches. The context needs a unified KV cache so branches share the trunk's cells.
 class engine {
   public:
-    engine(llama_context * ctx, llama_seq_id seq_base, int n_seqs);
+    // n_ctx_cache of the n_seqs sequences keep decoded contexts (prefix + context) for later requests
+    engine(llama_context * ctx, llama_seq_id seq_base, int n_seqs, int n_ctx_cache = 0);
 
     result decide(const std::string & shared_text, const std::string & context_text,
                   const std::vector<field_input> & fields, const options & opt);
@@ -131,6 +135,20 @@ class engine {
     tokens_t            cached;
     int                 rows_decoded = 0; // branch rows decoded by the last decide_batch (shared tokens once)
     std::vector<kept_path> kept;          // paths kept for the next round of score_branches
+    // a decoded context kept for later requests: the prefix and context cells (and recurrent state) in `seq`
+    struct ctx_entry {
+        tokens_t     shared;
+        tokens_t     toks;     // text contexts
+        std::string  key;      // prefill contexts
+        llama_seq_id seq;
+        llama_pos    pos_next;
+        size_t       n_tokens;
+        uint64_t     used;
+    };
+    std::vector<ctx_entry> ctx_cache;
+    llama_seq_id        seq_cache0 = 0;
+    int                 n_ctx_cache = 0;
+    uint64_t            use_clock = 0;
     bool                per_cell = true;  // memory is per KV cell (no recurrent layers): branches may share tokens
 
     tokens_t tokenize(const std::string & text, bool add_special) const;

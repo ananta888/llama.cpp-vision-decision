@@ -2567,7 +2567,7 @@ private:
         }
         if (!decision_engine) {
             decision_engine = std::make_unique<llama_decision::engine>(ctx_tgt, (llama_seq_id) params_base.n_parallel,
-                                                                        params_base.n_seq_decision);
+                                                                        params_base.n_seq_decision, params_base.decision_ctx_cache);
         }
         json calibration = json::object();
         for (const char * key : { "temperature", "abstain", "compact_ranges" }) {
@@ -2593,6 +2593,7 @@ private:
         opt.allow_cache = body.value("cache_prompt", true);
         opt.share_tokens = body.value("share_tokens", true);
         opt.tree_prune   = body.value("tree_prune", 0.0f);
+        opt.cache_context = body.value("cache_context", true);
         if (!(opt.tree_prune >= 0.0f && opt.tree_prune < 1.0f)) {
             throw std::invalid_argument("tree_prune must be in [0, 1)");
         }
@@ -2652,6 +2653,18 @@ private:
                 n_media_tokens += n_img;
             }
             inputs[i].n_tokens = mtmd_helper_get_n_tokens(chunks.get());
+            // the context cache knows an image context by its text and the ids of its images
+            inputs[i].cache_key = dynamic[i];
+            for (size_t k = 0; k < mtmd_input_chunks_size(chunks.get()); ++k) {
+                const auto it = enc.keys.find(mtmd_input_chunks_get(chunks.get(), k));
+                if (mtmd_input_chunk_get_type(mtmd_input_chunks_get(chunks.get(), k)) != MTMD_INPUT_CHUNK_TYPE_TEXT) {
+                    if (it == enc.keys.end()) {
+                        inputs[i].cache_key.clear(); // an image without an id: do not cache
+                        break;
+                    }
+                    inputs[i].cache_key += "\x1f" + it->second;
+                }
+            }
             const mtmd_input_chunks * c = chunks.get();
             context_chunks[i] = c;
             inputs[i].prefill = [this, &enc, c](llama_seq_id seq, llama_pos pos0) {
@@ -2663,8 +2676,10 @@ private:
         const auto b = decision_engine->decide_batch(shared, inputs, cs.inputs, opt);
 
         size_t context_tokens = 0;
+        long long n_ctx_cached = 0;
         for (const auto & r : b.items) {
             context_tokens += r.context_tokens;
+            n_ctx_cached   += r.context_cached ? 1 : 0;
         }
         json usage = json::object();
         usage["prompt_tokens"]  = (long long) (b.shared_tokens + context_tokens);
@@ -2672,6 +2687,7 @@ private:
         usage["context_tokens"] = (long long) context_tokens;
         usage["scored_rows"]    = b.rows;
         usage["decoded_rows"]   = b.rows_decoded;
+        usage["contexts_cached"] = n_ctx_cached;
         if (!enc.media.empty()) {
             usage["media_chunks"] = (long long) enc.media.size();
             usage["media_tokens"] = (long long) n_media_tokens;
@@ -2690,11 +2706,11 @@ private:
         json results = json::array();
         for (const auto & r : b.items) {
             json item = llama_decision::assemble(cs, r, body.value("return_probs", false));
-            item["usage"] = { { "context_tokens", (long long) r.context_tokens }, { "scored_rows", r.rows } };
+            item["usage"] = { { "context_tokens", (long long) r.context_tokens }, { "scored_rows", r.rows }, { "context_cached", r.context_cached } };
             results.push_back(item);
         }
-        SRV_INF("decision: %zu contexts, %zu fields, %zu media chunks (%zu tokens, %d cached), prefix %zu tokens%s, media encode %.0f ms, prefill %.0f ms, scoring %.0f ms\n",
-                b.items.size(), cs.specs.size(), enc.media.size(), n_media_tokens, enc.n_cached, b.shared_tokens,
+        SRV_INF("decision: %zu contexts (%lld from the context cache), %zu fields, %zu media chunks (%zu tokens, %d cached), prefix %zu tokens%s, media encode %.0f ms, prefill %.0f ms, scoring %.0f ms\n",
+                b.items.size(), n_ctx_cached, cs.specs.size(), enc.media.size(), n_media_tokens, enc.n_cached, b.shared_tokens,
                 b.cache_hit ? " (cached)" : "", enc.encode_ms, b.prefill_ms, b.scoring_ms);
         json trace;
         if (body.value("trace", false)) {
@@ -2730,7 +2746,7 @@ private:
                     chunks.push_back({ { "type", "text" }, { "tokens", (long long) r.context_tokens } });
                 }
                 results[i]["trace"] = { { "prompt", prompt }, { "chunks", chunks }, { "position_start", (long long) b.shared_tokens },
-                                        { "position_fields", r.pos_fields }, { "group", r.group } };
+                                        { "position_fields", r.pos_fields }, { "group", r.group }, { "context_cached", r.context_cached } };
             }
             trace = { { "instructions", cs.system_text }, { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
                       { "mode", opt.mode }, { "share_tokens", opt.share_tokens }, { "tree_prune", opt.tree_prune }, { "groups", n_groups }, { "fields", fields } };

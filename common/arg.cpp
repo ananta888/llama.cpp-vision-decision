@@ -2577,6 +2577,17 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
                 params.decision_max_media = value;
             }
         ).set_env("LLAMA_ARG_DECISION_MAX_MEDIA").set_examples({LLAMA_EXAMPLE_SERVER}));
+        add_opt(common_arg(
+            {"--decision-ctx-cache"}, "N",
+            string_format("of the --decision-seqs sequences, how many keep a decoded context (prefix + context, text or images) "
+                          "for later /decision requests about the same context (default: %d)", params.decision_ctx_cache),
+            [](common_params & params, int value) {
+                if (value < 0) {
+                    throw std::invalid_argument("--decision-ctx-cache must not be negative");
+                }
+                params.decision_ctx_cache = value;
+            }
+        ).set_env("LLAMA_ARG_DECISION_CTX_CACHE").set_examples({LLAMA_EXAMPLE_SERVER}));
     } else {
         add_opt(common_arg(
             {"-np", "--parallel"}, "N",
