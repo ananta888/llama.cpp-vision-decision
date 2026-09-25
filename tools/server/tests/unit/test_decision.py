@@ -393,3 +393,25 @@ def test_decision_context_cache():
     # a third context evicts the oldest of the two slots
     decide({**req, "contexts": ["A frog in a pond."]})
     assert decide({**req, "contexts": ["A frog in a pond."]})["usage"]["contexts_cached"] == 1
+
+
+def test_decision_context_first_layout():
+    global server
+    server.decision_ctx_cache = 2
+    server.start()
+    ctx = ["A photo of a small cat on a sofa.", image_context([0])]
+    first = decide({"schema": SCHEMA, "contexts": ctx, "layout": "context_first", "trace": True})
+    assert first["usage"]["contexts_cached"] == 0
+    assert first["trace"]["layout"] == "context_first" and "Fields:" in first["trace"]["context_tail"]
+    assert "Fields:" not in first["trace"]["instructions"]
+    # other questions about the same contexts: the contexts come from the cache
+    other = {"indoor": {"type": "boolean", "description": "Is the scene indoors?"},
+             "size": {"type": "enum", "choices": ["small", "medium", "large"], "description": "How big is the main object?"}}
+    second = decide({"schema": other, "contexts": ctx, "layout": "context_first", "instructions": "Look closely."})
+    assert second["usage"]["contexts_cached"] == 2
+    assert set(second["results"][0]["decision"]) == {"indoor", "size"}
+    # the same answers as without the cache
+    fresh = decide({"schema": other, "contexts": ctx, "layout": "context_first", "instructions": "Look closely.", "cache_context": False})
+    assert [r["decision"] for r in fresh["results"]] == [r["decision"] for r in second["results"]]
+    res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": ctx, "layout": "sideways"})
+    assert res.status_code == 400

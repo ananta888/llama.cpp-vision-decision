@@ -49,6 +49,8 @@ struct options {
     bool        share_tokens   = true;   // decode tokens that branches have in common once (a trie)
     float       tree_prune     = 0.0f;   // tree fields: open a trie node only when reached with at least this probability
     bool        cache_context  = true;   // keep decoded contexts for later requests (engine built with context cache slots)
+    std::string context_tail;            // text decoded after every context, before the fields (e.g. the questions when the
+                                         // context comes first); not part of what the context cache keeps
 };
 
 struct field_result {
@@ -177,6 +179,8 @@ struct field_spec {
 
 struct compiled_schema {
     std::string              system_text; // fixed instructions + field catalogue (cacheable)
+    std::string              task_text;   // the fixed instructions alone
+    std::string              fields_text; // the field catalogue and the caller's instructions
     std::vector<field_spec>  specs;
     std::vector<field_input> inputs;
 };

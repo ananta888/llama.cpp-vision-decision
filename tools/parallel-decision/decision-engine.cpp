@@ -549,6 +549,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         throw std::invalid_argument("a decision needs at least one context");
     }
     const tokens_t shared = tokenize(shared_text, true);
+    const tokens_t tail   = opt.context_tail.empty() ? tokens_t() : tokenize(opt.context_tail, false);
     std::vector<tokens_t> prefixes(contexts.size());
     for (size_t i = 0; i < contexts.size(); ++i) {
         if (contexts[i].prefill) {
@@ -635,7 +636,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
     std::vector<size_t> ctx_tokens(contexts.size());
     for (size_t i = 0; i < contexts.size(); ++i) {
         ctx_tokens[i] = contexts[i].prefill ? contexts[i].n_tokens : prefixes[i].size();
-        if (shared.size() + ctx_tokens[i] + std::min<size_t>(n_batch, total) > n_kv) {
+        if (shared.size() + ctx_tokens[i] + tail.size() + std::min<size_t>(n_batch, total) > n_kv) {
             throw std::invalid_argument("a decision context of " + std::to_string(ctx_tokens[i]) + " tokens does not fit the KV cache (" +
                                         std::to_string(n_kv) + " cells, " + std::to_string(shared.size()) + " used by the instructions)");
         }
@@ -742,7 +743,7 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         const llama_pos pos_ctx = (llama_pos) shared.size();
         std::vector<prompt_part> parts;
         std::vector<bool> hit(n_group, false);
-        size_t need = shared.size() + std::min<size_t>(n_batch, (size_t) total * n_group);
+        size_t need = shared.size() + tail.size() * n_group + std::min<size_t>(n_batch, (size_t) total * n_group);
         for (size_t i = 0; i < n_group; ++i) {
             need += find_entry(g0 + i) ? 0 : ctx_tokens[g0 + i];
         }
@@ -780,6 +781,16 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             if (!hit[i]) {
                 store_entry(g0 + i, seq_pool + (llama_seq_id) i);
             }
+        }
+        if (!tail.empty()) {
+            // the part after the context (not cached with it) goes on every trunk of the group in one batch
+            std::vector<prompt_part> tails;
+            for (size_t i = 0; i < n_group; ++i) {
+                tails.push_back({ &tail, pos_next[g0 + i], seq_pool + (llama_seq_id) i });
+                pos_next[g0 + i] += (llama_pos) tail.size();
+            }
+            decode_parts(tails);
+            llama_synchronize(ctx);
         }
         out.prefill_ms += ms_since(tp);
 
@@ -1092,8 +1103,10 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         catalog += (catalog.empty() ? "" : "\n") + json_text(f.name) + (f.description.empty() ? "" : ": " + f.description) +
                    "\nAllowed values: " + allowed;
     }
-    cs.system_text = "Select the requested field value from its allowed values, based on the context. "
-                     "Respond with the JSON value only.\n\nFields:\n" + catalog + "\n" + instructions;
+    cs.task_text   = "Select the requested field value from its allowed values, based on the context. "
+                     "Respond with the JSON value only.";
+    cs.fields_text = "Fields:\n" + catalog + "\n" + instructions;
+    cs.system_text = cs.task_text + "\n\n" + cs.fields_text;
     return cs;
 }
 

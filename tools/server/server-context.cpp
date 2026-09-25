@@ -2576,14 +2576,36 @@ private:
             }
         }
         const auto cs = llama_decision::compile_schema(body.at("schema"), body.value("instructions", std::string()), calibration);
-        std::string shared;
+        // schema_first: the field catalogue in the system message, the context after it (the catalogue is cached);
+        // context_first: only the task in the system message, then the context and after it the questions (the
+        // context can be cached for any questions, see --decision-ctx-cache)
+        const std::string layout = body.value("layout", std::string("schema_first"));
+        if (layout != "schema_first" && layout != "context_first") {
+            throw std::invalid_argument("layout must be schema_first or context_first");
+        }
+        const bool context_first = layout == "context_first";
+        std::string shared, context_tail;
         std::vector<std::string> dynamic;
         for (const auto & c : contexts) {
-            auto [head, tail] = llama_decision::render_prompt(chat_params.tmpls.get(), chat_params.use_jinja, cs.system_text, c);
+            const std::string user = context_first ? c + "\n\n" + cs.fields_text : c;
+            auto [head, tail] = llama_decision::render_prompt(chat_params.tmpls.get(), chat_params.use_jinja,
+                                                              context_first ? cs.task_text : cs.system_text, user);
             if (dynamic.empty()) {
                 shared = head;
             } else if (head != shared) {
                 throw std::runtime_error("the chat template renders a different prefix per context");
+            }
+            if (context_first) {
+                // the context alone is the per-request part; what follows it is the same for every context
+                if (tail.compare(0, c.size(), c) != 0) {
+                    throw std::runtime_error("the chat template changed the context text; use layout schema_first");
+                }
+                const std::string rest = tail.substr(c.size());
+                if (!dynamic.empty() && rest != context_tail) {
+                    throw std::runtime_error("the chat template renders a different tail per context");
+                }
+                context_tail = rest;
+                tail = c;
             }
             dynamic.push_back(tail);
         }
@@ -2594,6 +2616,7 @@ private:
         opt.share_tokens = body.value("share_tokens", true);
         opt.tree_prune   = body.value("tree_prune", 0.0f);
         opt.cache_context = body.value("cache_context", true);
+        opt.context_tail  = context_tail;
         if (!(opt.tree_prune >= 0.0f && opt.tree_prune < 1.0f)) {
             throw std::invalid_argument("tree_prune must be in [0, 1)");
         }
@@ -2748,8 +2771,8 @@ private:
                 results[i]["trace"] = { { "prompt", prompt }, { "chunks", chunks }, { "position_start", (long long) b.shared_tokens },
                                         { "position_fields", r.pos_fields }, { "group", r.group }, { "context_cached", r.context_cached } };
             }
-            trace = { { "instructions", cs.system_text }, { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
-                      { "mode", opt.mode }, { "share_tokens", opt.share_tokens }, { "tree_prune", opt.tree_prune }, { "groups", n_groups }, { "fields", fields } };
+            trace = { { "instructions", context_first ? cs.task_text : cs.system_text }, { "context_tail", context_tail }, { "prompt_prefix", shared }, { "prefix_tokens", (long long) b.shared_tokens }, { "prefix_cached", b.cache_hit },
+                      { "layout", layout }, { "mode", opt.mode }, { "share_tokens", opt.share_tokens }, { "tree_prune", opt.tree_prune }, { "groups", n_groups }, { "fields", fields } };
         }
         json out = json::object();
         out["object"]  = "decision";
