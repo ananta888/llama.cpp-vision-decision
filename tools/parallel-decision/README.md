@@ -110,6 +110,7 @@ Compact fields, or a JSON Schema object with `properties`:
 | `boolean` | - | true / false |
 | `integer` | `minimum`, `maximum`, optional `step` (`multipleOf` in JSON Schema) | 1-255 values; `step` counts from the minimum |
 | `number` | `minimum`, `maximum`, `step` (`multipleOf` in JSON Schema) | fixed-width decimals |
+| `string` | `max_tokens` | open field: free text, generated (see below) |
 
 Numeric fields take `aggregate`: `mode` (default), `median` or `mean`.
 
@@ -384,6 +385,50 @@ python3 bench/equivalence.py --url http://127.0.0.1:8096 --image /tmp/shapes/000
 
 `bench/evaluate.py DIR` measures accuracy and calibration on the images of `shapes.py`, and `bench/bench.py DIR`
 measures latency.
+
+### Hybrid decisions (closed fields + one open field)
+
+A schema may mix closed fields with **at most one open field** (`{"type": "string", "max_tokens": N}`, N in 1-1024).
+The closed fields are scored as usual; then the open field is **generated** on the same context, in the same call:
+the scored closed values form the generation prefix, and the model continues autoregressively until end-of-generation
+or `max_tokens`. One HTTP call, one prefill.
+
+| option | default | meaning |
+|---|---|---|
+| `open_sampling` | `greedy` | open fields only: `greedy` (argmax, deterministic) or `temperature` |
+| `open_temp` | 0.7 | open fields only: temperature when `open_sampling` is `temperature` |
+
+This fork: the open field is generated at each trunk's next position, so it also works after image contexts and
+with the context cache (the cached context is copied before generation and stays unchanged).
+
+```bash
+curl http://localhost:8096/v1/decision -H "Content-Type: application/json" -d '{
+  "model": "gemma-4-12b",
+  "schema": {
+    "category": {"type": "enum", "choices": ["billing","technical","other"],
+                 "description": "What type of support request is this?"},
+    "urgent":   {"type": "boolean", "description": "Does this need urgent handling?"},
+    "reason":   {"type": "string", "max_tokens": 128, "description": "One-sentence reason."}
+  },
+  "contexts": ["I was charged twice and need this fixed today."]
+}'
+```
+
+```json
+{
+  "decision": {"category": "billing", "urgent": true, "reason": "The user was charged twice."},
+  "fields": {
+    "category": {"value": "billing", "probability": 1.0, "scored_nodes": 1, "tree": true},
+    "urgent":   {"value": true,      "probability": 1.0, "scored_nodes": 1, "tree": true},
+    "reason":   {"value": "The user was charged twice.", "generated": true, "tokens": 9, "truncated": false}
+  },
+  "usage": {"context_tokens": 21, "scored_rows": 14, "generated_tokens": 9}
+}
+```
+
+The open field's entry carries `generated: true`, `tokens` (how many were generated) and `truncated` (true when
+`max_tokens` was reached before end-of-generation). `timings` gains `generation_ms`; the batch `usage` gains
+`generated_tokens`.
 
 ## CLI
 

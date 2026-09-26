@@ -35,10 +35,14 @@ struct context_input {
 };
 
 // One field as the scorer sees it: the text before its value and the allowed value texts.
+// An open field has no candidates: its value is generated (bounded by max_tokens) on the
+// context's trunk after the closed fields are scored, with their chosen values before it.
 struct field_input {
+    std::string              name;       // schema field name
     std::string              suffix;     // e.g.  '  "fire": '
     std::vector<std::string> candidates; // allowed values, with the suffix's shared prefix removed
     float                    temperature = 1.0f; // tree: p(value)^(1/T), renormalised; greedy: per step
+    int                      max_tokens  = 0;    // open fields: generation cap (1-1024)
 };
 
 struct options {
@@ -51,6 +55,8 @@ struct options {
     bool        cache_context  = true;   // keep decoded contexts for later requests (engine built with context cache slots)
     std::string context_tail;            // text decoded after every context, before the fields (e.g. the questions when the
                                          // context comes first); not part of what the context cache keeps
+    std::string open_sampling  = "greedy"; // open fields: greedy (argmax) or temperature
+    float       open_temp      = 0.7f;     // open fields: temperature when open_sampling is temperature
 };
 
 struct field_result {
@@ -73,6 +79,12 @@ struct result {
     int    rounds         = 0;
     double prefill_ms     = 0;
     double scoring_ms     = 0;
+    // the open field (at most one): generated on the context's trunk after the closed fields
+    bool        has_open       = false;
+    std::string open_text;
+    int         open_tokens    = 0;
+    bool        open_truncated = false;
+    double      generation_ms  = 0;
 };
 
 // Several contexts decided against one schema and one cached prefix. Items carry fields,
@@ -86,6 +98,7 @@ struct batch_result {
     int    rounds        = 0;
     double prefill_ms    = 0;
     double scoring_ms    = 0;
+    double generation_ms = 0;
 };
 
 // Scores decisions on an existing context with the sequence ids [seq_base, seq_base + n_seqs):
@@ -163,13 +176,19 @@ class engine {
     void     clear_pool();
     void     drop_kept();
     std::vector<std::vector<float>> score_branches(const std::vector<branch> & branches, llama_seq_id first, int n_free, bool share);
+
+    // Generate the open field's value on the context's trunk before the trunk is released: the scored
+    // closed fields form the generation prefix, then the model continues autoregressively until
+    // end-of-generation or the field's max_tokens.
+    void generate_open(llama_seq_id trunk, llama_pos pos0, const std::vector<field_input> & inputs, int open_idx,
+                       const std::vector<field_result> & scored, const options & opt, result & r);
 };
 
 // ---- schema compiler (the C++ counterpart of llama-mojo's tools/prepare_decisions.py)
 
 struct field_spec {
     std::string              name;
-    std::string              type;        // boolean | enum | integer | number
+    std::string              type;        // boolean | enum | integer | number | string (open)
     std::string              description;
     std::string              aggregate;   // mode | median | mean (median/mean: numeric fields)
     std::vector<common_json> values;      // typed values; index = candidate index
@@ -179,6 +198,8 @@ struct field_spec {
     float                    temperature     = 1.0f;
     double                   min_probability = 0; // abstain below this probability
     double                   min_margin      = 0; // abstain below this top-2 margin (tree fields)
+    bool                     is_open         = false; // string field with max_tokens: generated, not scored
+    int                      max_tokens      = 0;     // open fields: generation cap (1-1024)
 };
 
 struct compiled_schema {

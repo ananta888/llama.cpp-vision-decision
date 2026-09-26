@@ -5,12 +5,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <random>
 #include <stdexcept>
 
 namespace llama_decision {
@@ -234,6 +236,63 @@ struct decision_field {
         path_score = probs[best];
     }
 };
+
+// Greedy (argmax) or temperature sampling over the full vocabulary.
+llama_token sample_token(const llama_vocab * vocab, const float * logits, const std::string & sampling,
+                         float temp, std::mt19937 & rng, std::vector<float> & scratch) {
+    const int n = llama_vocab_n_tokens(vocab);
+    if (sampling != "temperature" || temp <= 0.0f) {
+        return (llama_token) (std::max_element(logits, logits + n) - logits);
+    }
+    const float mx = *std::max_element(logits, logits + n);
+    scratch.resize((size_t) n);
+    for (int i = 0; i < n; ++i) {
+        scratch[i] = std::exp((logits[i] - mx) / temp);
+    }
+    std::discrete_distribution<int> dist(scratch.begin(), scratch.end());
+    return (llama_token) dist(rng);
+}
+
+// The open field is the last field of the JSON answer: the model writes its value as a JSON string
+// literal and closes the object. Primary: json_head ("{\n" + the closed fields + the open suffix) plus
+// the generated tail is the whole object; read the field from it. Fallback: strip whitespace and
+// quotes and parse the string literal.
+std::string recover_open_text(std::string text, bool truncated, const std::string & json_head, const std::string & field_name) {
+    if (!truncated && !field_name.empty()) {
+        try {
+            const auto obj = common_json::parse(json_head + text);
+            if (obj.is_object() && obj.contains(field_name) && obj.at(field_name).is_string()) {
+                return obj.at(field_name).get<std::string>();
+            }
+        } catch (...) {
+            // the tail is not a complete JSON object; fall through to literal recovery
+        }
+    }
+    size_t start = 0;
+    while (start < text.size() && std::isspace((unsigned char) text[start])) {
+        ++start;
+    }
+    text = text.substr(start);
+    if (!text.empty() && text[0] == '"') {
+        text.erase(0, 1);
+        if (!truncated) {
+            const size_t q = text.rfind('"');
+            if (q != std::string::npos) {
+                const std::string lit = text.substr(0, q);
+                try {
+                    const auto parsed = common_json::parse(std::string("\"") + lit + "\"");
+                    if (parsed.is_string()) {
+                        return parsed.get<std::string>();
+                    }
+                } catch (...) {
+                    // the model escaped something the parser rejects; keep the raw text
+                }
+                text = lit;
+            }
+        }
+    }
+    return text;
+}
 
 } // namespace
 
@@ -569,6 +628,7 @@ result engine::decide(const std::string & shared_text, const std::string & conte
     r.rounds        = b.rounds;
     r.prefill_ms    = b.prefill_ms;
     r.scoring_ms    = b.scoring_ms;
+    r.generation_ms = b.generation_ms;
     return r;
 }
 
@@ -608,7 +668,22 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
     std::vector<decision_field> fields;
     int total    = 0;
     int branches = 0; // round-1 branches of one context
-    for (const auto & in : inputs) {
+    int open_idx = -1;
+    for (size_t fi = 0; fi < inputs.size(); ++fi) {
+        const auto & in = inputs[fi];
+        if (in.candidates.empty() && in.max_tokens > 0) {
+            // open field: generated on the trunk after the closed fields are scored; a placeholder
+            // keeps the field indices aligned with the schema and is never scored
+            if (in.max_tokens > 1024) {
+                throw std::invalid_argument("an open field needs max_tokens between 1 and 1024");
+            }
+            if (open_idx >= 0) {
+                throw std::invalid_argument("at most one open (free-text) field is allowed");
+            }
+            open_idx = (int) fi;
+            fields.emplace_back(tokens_t{}, std::vector<tokens_t>{});
+            continue;
+        }
         const size_t n = in.candidates.size();
         if (n < 1 || n > 255) {
             throw std::invalid_argument("each field needs 1-255 allowed values");
@@ -674,10 +749,12 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
     // a group of trunks shares the KV cache with the cached prefix and one round of branch rows
     const size_t n_kv    = llama_n_ctx(ctx);
     const size_t n_batch = llama_n_batch(ctx);
+    // cells an open field adds to its trunk: the closed fields' text (bounded by their rows) and the generation
+    const size_t open_cells = open_idx >= 0 ? (size_t) total + (size_t) inputs[open_idx].max_tokens + 16 : 0;
     std::vector<size_t> ctx_tokens(contexts.size());
     for (size_t i = 0; i < contexts.size(); ++i) {
         ctx_tokens[i] = contexts[i].prefill ? contexts[i].n_tokens : prefixes[i].size();
-        if (shared.size() + ctx_tokens[i] + tail.size() + std::min<size_t>(n_batch, total) > n_kv) {
+        if (shared.size() + ctx_tokens[i] + tail.size() + std::max(open_cells, std::min<size_t>(n_batch, total)) > n_kv) {
             throw std::invalid_argument("a decision context of " + std::to_string(ctx_tokens[i]) + " tokens does not fit the KV cache (" +
                                         std::to_string(n_kv) + " cells, " + std::to_string(shared.size()) + " used by the instructions)");
         }
@@ -784,7 +861,8 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
         const llama_pos pos_ctx = (llama_pos) shared.size();
         std::vector<prompt_part> parts;
         std::vector<bool> hit(n_group, false);
-        size_t need = shared.size() + tail.size() * n_group + std::min<size_t>(n_batch, (size_t) total * n_group);
+        size_t need = shared.size() + tail.size() * n_group +
+                      std::max(open_cells * n_group, std::min<size_t>(n_batch, (size_t) total * n_group));
         for (size_t i = 0; i < n_group; ++i) {
             need += find_entry(g0 + i) ? 0 : ctx_tokens[g0 + i];
         }
@@ -846,6 +924,9 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
                 const llama_seq_id trunk = seq_pool + (llama_seq_id) i;
                 const llama_pos    pos0  = pos_next[g0 + i];
                 for (size_t f = 0; f < state[i].size(); ++f) {
+                    if ((int) f == open_idx) {
+                        continue;
+                    }
                     auto & fd = state[i][f];
                     if (fd.use_tree) {
                         for (int n : fd.next_nodes(opt.tree_prune)) {
@@ -895,7 +976,6 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             }
         }
         for (size_t i = 0; i < n_group; ++i) {
-            llama_memory_seq_rm(mem, seq_pool + (llama_seq_id) i, -1, -1);
             result & r = out.items[g0 + i];
             r.context_tokens = contexts[g0 + i].prefill ? contexts[g0 + i].n_tokens : prefixes[g0 + i].size();
             r.rows           = total;
@@ -906,10 +986,81 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
             }
         }
         out.scoring_ms += ms_since(ts);
+        // the open field is generated on each trunk before it is released, after the chosen closed values
+        if (open_idx >= 0) {
+            const auto tg = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < n_group; ++i) {
+                generate_open(seq_pool + (llama_seq_id) i, pos_next[g0 + i], inputs, open_idx, out.items[g0 + i].fields, opt,
+                              out.items[g0 + i]);
+            }
+            out.generation_ms += ms_since(tg);
+        }
+        for (size_t i = 0; i < n_group; ++i) {
+            llama_memory_seq_rm(mem, seq_pool + (llama_seq_id) i, -1, -1);
+        }
     }
     guard.armed = false;
     out.rows_decoded = rows_decoded;
     return out;
+}
+
+void engine::generate_open(llama_seq_id trunk, llama_pos pos0, const std::vector<field_input> & inputs, int open_idx,
+                           const std::vector<field_result> & scored, const options & opt, result & r) {
+    const field_input & open = inputs[open_idx];
+    // generation prefix: the scored closed fields in schema order, then the open field's suffix
+    std::string gen;
+    for (size_t f = 0; f < inputs.size(); ++f) {
+        if ((int) f == open_idx) {
+            continue;
+        }
+        const auto & fr = scored[f];
+        if (fr.winner < 0 || (size_t) fr.winner >= inputs[f].candidates.size()) {
+            throw std::runtime_error("a closed field has no selected value");
+        }
+        gen += inputs[f].suffix + inputs[f].candidates[fr.winner] + ",\n";
+    }
+    gen += open.suffix;
+
+    auto decode_one = [&](llama_token tok, llama_pos pos, const char * what) {
+        llama_batch b = llama_batch_init(1, 0, 1);
+        common_batch_add(b, tok, pos, { trunk }, true);
+        const int rc = llama_decode(ctx, b);
+        llama_batch_free(b);
+        if (rc != 0) {
+            throw std::runtime_error(rc == 1 ? std::string("no free KV cache space for the open field ") + what
+                                             : std::string("llama_decode failed on the open field ") + what + " (" + std::to_string(rc) + ")");
+        }
+    };
+    // the prefix in batch-sized chunks; only its last token needs logits
+    const tokens_t prefix  = tokenize(gen, false);
+    const size_t   n_batch = std::max<size_t>(1, llama_n_batch(ctx));
+    int last = 0;
+    for (size_t at = 0; at < prefix.size(); at += n_batch) {
+        const size_t n = std::min(n_batch, prefix.size() - at);
+        llama_batch batch = llama_batch_init((int) n, 0, 1);
+        for (size_t i = 0; i < n; ++i) {
+            common_batch_add(batch, prefix[at + i], pos0 + (llama_pos) (at + i), { trunk }, at + i + 1 == prefix.size());
+        }
+        const int rc = llama_decode(ctx, batch);
+        llama_batch_free(batch);
+        if (rc != 0) {
+            throw std::runtime_error(rc == 1 ? "no free KV cache space for the open field prefix"
+                                             : "llama_decode failed on the open field prefix (" + std::to_string(rc) + ")");
+        }
+        last = (int) n - 1;
+    }
+    std::mt19937       rng(std::random_device{}());
+    std::vector<float> scratch;
+    llama_token next = sample_token(vocab, llama_get_logits_ith(ctx, last), opt.open_sampling, opt.open_temp, rng, scratch);
+    r.has_open = true;
+    for (int t = 0; t < open.max_tokens && !llama_vocab_is_eog(vocab, next); ++t) {
+        r.open_text += common_token_to_piece(vocab, next);
+        r.open_tokens += 1;
+        decode_one(next, pos0 + (llama_pos) (prefix.size() + t), "generation");
+        next = sample_token(vocab, llama_get_logits_ith(ctx, 0), opt.open_sampling, opt.open_temp, rng, scratch);
+    }
+    r.open_truncated = r.open_tokens == open.max_tokens && !llama_vocab_is_eog(vocab, next);
+    r.open_text      = recover_open_text(std::move(r.open_text), r.open_truncated, std::string("{\n") + gen, open.name);
 }
 
 // ---------------------------------------------------------------- schema compiler
@@ -936,6 +1087,23 @@ field_spec make_field(const std::string & name, const std::string & type, const 
     f.name        = name;
     f.description = description;
     const std::string kind = type;
+    if (kind == "string" && spec.contains("max_tokens")) {
+        // open field: generated after the closed fields, bounded by max_tokens
+        if (!spec.at("max_tokens").is_number_integer()) {
+            throw std::invalid_argument("field \"" + name + "\": max_tokens must be an integer");
+        }
+        const int n = spec.at("max_tokens").get<int>();
+        if (n < 1 || n > 1024) {
+            throw std::invalid_argument("field \"" + name + "\": open fields need max_tokens between 1 and 1024");
+        }
+        if (nullable) {
+            throw std::invalid_argument("field \"" + name + "\": an open field cannot be nullable");
+        }
+        f.type       = "string";
+        f.is_open    = true;
+        f.max_tokens = n;
+        return f;
+    }
     if (kind == "boolean") {
         f.type    = "boolean";
         f.values  = { common_json(true), common_json(false) };
@@ -1004,7 +1172,7 @@ field_spec make_field(const std::string & name, const std::string & type, const 
             f.numbers.push_back(v);
         }
     } else {
-        throw std::invalid_argument("field \"" + name + "\": supported types are boolean, enum, integer and number");
+        throw std::invalid_argument("field \"" + name + "\": supported types are boolean, enum, integer, number and string with max_tokens");
     }
     if (nullable) {
         // e.g. a size that the image does not show
@@ -1107,8 +1275,25 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         throw std::invalid_argument("compact_ranges must be a boolean");
     }
     const bool compact = compact_v.get<bool>();
+    const size_t n_open = (size_t) std::count_if(cs.specs.begin(), cs.specs.end(), [](const field_spec & f) { return f.is_open; });
+    if (n_open > 1) {
+        throw std::invalid_argument("at most one open (free-text) field is allowed");
+    }
+    if (n_open == cs.specs.size()) {
+        throw std::invalid_argument("a schema needs at least one closed field besides the open one");
+    }
     std::string catalog;
     for (const auto & f : cs.specs) {
+        if (f.is_open) {
+            field_input in;
+            in.name       = f.name;
+            in.suffix     = "  " + json_text(f.name) + ": ";
+            in.max_tokens = f.max_tokens;
+            cs.inputs.push_back(in);
+            catalog += (catalog.empty() ? "" : "\n") + json_text(f.name) + (f.description.empty() ? "" : ": " + f.description) +
+                       "\nFree text (a JSON string, up to " + std::to_string(f.max_tokens) + " tokens)";
+            continue;
+        }
         // the value's common leading characters are fixed in the suffix; only the rest is scored
         std::string common = f.encoded[0];
         for (const auto & v : f.encoded) {
@@ -1119,6 +1304,7 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
             common.resize(c);
         }
         field_input in;
+        in.name        = f.name;
         in.suffix      = "  " + json_text(f.name) + ": " + common;
         in.temperature = f.temperature;
         for (const auto & v : f.encoded) {
@@ -1144,8 +1330,10 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         catalog += (catalog.empty() ? "" : "\n") + json_text(f.name) + (f.description.empty() ? "" : ": " + f.description) +
                    "\nAllowed values: " + allowed;
     }
-    cs.task_text   = "Select the requested field value from its allowed values, based on the context. "
-                     "Respond with the JSON value only.";
+    cs.task_text   = n_open ? "Select the requested field values from their allowed values and write the free-text field, "
+                              "based on the context. Respond with the JSON object only."
+                            : "Select the requested field value from its allowed values, based on the context. "
+                              "Respond with the JSON value only.";
     cs.fields_text = "Fields:\n" + catalog + "\n" + instructions;
     cs.system_text = cs.task_text + "\n\n" + cs.fields_text;
     return cs;
@@ -1183,6 +1371,16 @@ common_json assemble(const compiled_schema & cs, const result & r, bool with_pro
     bool        rules     = false;
     for (size_t i = 0; i < cs.specs.size(); ++i) {
         const auto & sp = cs.specs[i];
+        if (sp.is_open) {
+            common_json f     = common_json::object();
+            decision[sp.name] = r.open_text;
+            f["value"]        = r.open_text;
+            f["generated"]    = true;
+            f["tokens"]       = r.open_tokens;
+            f["truncated"]    = r.open_truncated;
+            fields[sp.name]   = f;
+            continue;
+        }
         const auto & fr = r.fields[i];
         int idx = fr.winner;
         common_json f = common_json::object();

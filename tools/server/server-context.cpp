@@ -2506,6 +2506,14 @@ private:
         opt.tree_prune   = body.value("tree_prune", 0.0f);
         opt.cache_context = body.value("cache_context", true);
         opt.context_tail  = context_tail;
+        opt.open_sampling = body.value("open_sampling", std::string("greedy"));
+        opt.open_temp     = body.value("open_temp", 0.7f);
+        if (opt.open_sampling != "greedy" && opt.open_sampling != "temperature") {
+            throw std::invalid_argument("\"open_sampling\" must be greedy or temperature");
+        }
+        if (!(opt.open_temp >= 0.0f)) {
+            throw std::invalid_argument("\"open_temp\" must be non-negative");
+        }
         if (!(opt.tree_prune >= 0.0f && opt.tree_prune < 1.0f)) {
             throw std::invalid_argument("tree_prune must be in [0, 1)");
         }
@@ -2589,9 +2597,11 @@ private:
 
         size_t context_tokens = 0;
         long long n_ctx_cached = 0;
+        long long n_generated  = 0;
         for (const auto & r : b.items) {
             context_tokens += r.context_tokens;
             n_ctx_cached   += r.context_cached ? 1 : 0;
+            n_generated    += r.open_tokens;
         }
         json usage = json::object();
         usage["prompt_tokens"]  = (long long) (b.shared_tokens + context_tokens);
@@ -2600,6 +2610,7 @@ private:
         usage["scored_rows"]    = b.rows;
         usage["decoded_rows"]   = b.rows_decoded;
         usage["contexts_cached"] = n_ctx_cached;
+        usage["generated_tokens"] = n_generated;
         if (!enc.media.empty()) {
             usage["media_chunks"] = (long long) enc.media.size();
             usage["media_tokens"] = (long long) n_media_tokens;
@@ -2611,14 +2622,16 @@ private:
             timings["media_encode_ms"] = enc.encode_ms; // part of prefill_ms
         }
         timings["scoring_ms"] = b.scoring_ms;
-        timings["total_ms"]   = b.prefill_ms + b.scoring_ms;
+        timings["generation_ms"] = b.generation_ms;
+        timings["total_ms"]   = b.prefill_ms + b.scoring_ms + b.generation_ms;
         timings["rounds"]     = b.rounds;
-        timings["per_decision_ms"] = (b.prefill_ms + b.scoring_ms) / (double) b.items.size();
+        timings["per_decision_ms"] = (b.prefill_ms + b.scoring_ms + b.generation_ms) / (double) b.items.size();
 
         json results = json::array();
         for (const auto & r : b.items) {
             json item = llama_decision::assemble(cs, r, body.value("return_probs", false));
-            item["usage"] = { { "context_tokens", (long long) r.context_tokens }, { "scored_rows", r.rows }, { "context_cached", r.context_cached } };
+            item["usage"] = { { "context_tokens", (long long) r.context_tokens }, { "scored_rows", r.rows }, { "context_cached", r.context_cached },
+                              { "generated_tokens", (long long) r.open_tokens } };
             results.push_back(item);
         }
         SRV_INF("decision: %zu contexts (%lld from the context cache), %zu fields, %zu media chunks (%zu tokens, %d cached), prefix %zu tokens%s, media encode %.0f ms, prefill %.0f ms, scoring %.0f ms\n",
