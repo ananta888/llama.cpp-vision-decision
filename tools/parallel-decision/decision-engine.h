@@ -43,6 +43,8 @@ struct field_input {
     std::vector<std::string> candidates; // allowed values, with the suffix's shared prefix removed
     float                    temperature = 1.0f; // tree: p(value)^(1/T), renormalised; greedy: per step
     int                      max_tokens  = 0;    // open fields: generation cap (1-1024)
+    int                      when_field  = -1;   // open fields: generate only when this closed field's winner
+    std::vector<int>         when_values;        //   is one of these candidate indices (when_field < 0: always)
 };
 
 struct options {
@@ -84,6 +86,7 @@ struct result {
     std::string open_text;
     int         open_tokens    = 0;
     bool        open_truncated = false;
+    bool        open_skipped   = false; // the open field's "when" condition did not hold: nothing generated
     double      generation_ms  = 0;
 };
 
@@ -200,6 +203,7 @@ struct field_spec {
     double                   min_margin      = 0; // abstain below this top-2 margin (tree fields)
     bool                     is_open         = false; // string field with max_tokens: generated, not scored
     int                      max_tokens      = 0;     // open fields: generation cap (1-1024)
+    common_json              when;                    // open fields: {"closed field": [values]} or null
 };
 
 struct compiled_schema {

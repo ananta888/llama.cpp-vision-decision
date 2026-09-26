@@ -398,6 +398,10 @@ or `max_tokens`. One HTTP call, one prefill.
 | `open_sampling` | `greedy` | open fields only: `greedy` (argmax, deterministic) or `temperature` |
 | `open_temp` | 0.7 | open fields only: temperature when `open_sampling` is `temperature` |
 
+`"when": {"tool": ["search", "open_url"]}` on the open field generates it only when the named closed field won one
+of the listed values; otherwise the field comes back empty with `"skipped": true` and costs nothing (e.g. a tool
+argument when the chosen tool takes no text).
+
 This fork: the open field is generated at each trunk's next position, so it also works after image contexts and
 with the context cache (the cached context is copied before generation and stays unchanged).
 

@@ -1007,6 +1007,14 @@ batch_result engine::decide_batch(const std::string & shared_text, const std::ve
 void engine::generate_open(llama_seq_id trunk, llama_pos pos0, const std::vector<field_input> & inputs, int open_idx,
                            const std::vector<field_result> & scored, const options & opt, result & r) {
     const field_input & open = inputs[open_idx];
+    r.has_open = true;
+    if (open.when_field >= 0) {
+        const int won = scored[open.when_field].winner;
+        if (std::find(open.when_values.begin(), open.when_values.end(), won) == open.when_values.end()) {
+            r.open_skipped = true; // e.g. the chosen tool takes no text: nothing to generate
+            return;
+        }
+    }
     // generation prefix: the scored closed fields in schema order, then the open field's suffix
     std::string gen;
     for (size_t f = 0; f < inputs.size(); ++f) {
@@ -1052,7 +1060,6 @@ void engine::generate_open(llama_seq_id trunk, llama_pos pos0, const std::vector
     std::mt19937       rng(std::random_device{}());
     std::vector<float> scratch;
     llama_token next = sample_token(vocab, llama_get_logits_ith(ctx, last), opt.open_sampling, opt.open_temp, rng, scratch);
-    r.has_open = true;
     // Stop when the value is complete: a JSON string literal ends at its first unescaped quote (the model
     // would otherwise go on to invent further fields), anything else at a comma, newline or brace.
     auto value_end = [](const std::string & text) -> size_t {
@@ -1132,6 +1139,13 @@ field_spec make_field(const std::string & name, const std::string & type, const 
         f.type       = "string";
         f.is_open    = true;
         f.max_tokens = n;
+        if (spec.contains("when") && !spec.at("when").is_null()) {
+            const auto & w = spec.at("when");
+            if (!w.is_object() || w.size() != 1 || !w.begin().value().is_array() || w.begin().value().empty()) {
+                throw std::invalid_argument("field \"" + name + "\": when must be {\"closed field\": [values]}");
+            }
+            f.when = w;
+        }
         return f;
     }
     if (kind == "boolean") {
@@ -1319,6 +1333,26 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
             in.name       = f.name;
             in.suffix     = "  " + json_text(f.name) + ": ";
             in.max_tokens = f.max_tokens;
+            if (f.when.is_object()) {
+                // resolve {"field": [values]} to the closed field's index and the candidate indices of the values
+                const std::string target = f.when.begin().key();
+                for (size_t k = 0; k < cs.specs.size(); ++k) {
+                    if (cs.specs[k].name == target && !cs.specs[k].is_open) {
+                        in.when_field = (int) k;
+                    }
+                }
+                if (in.when_field < 0) {
+                    throw std::invalid_argument("field \"" + f.name + "\": when names no closed field \"" + target + "\"");
+                }
+                const auto & values = cs.specs[in.when_field].values;
+                for (const auto & v : f.when.begin().value()) {
+                    const auto it = std::find(values.begin(), values.end(), v);
+                    if (it == values.end()) {
+                        throw std::invalid_argument("field \"" + f.name + "\": when lists a value \"" + target + "\" does not allow");
+                    }
+                    in.when_values.push_back((int) (it - values.begin()));
+                }
+            }
             cs.inputs.push_back(in);
             catalog += (catalog.empty() ? "" : "\n") + json_text(f.name) + (f.description.empty() ? "" : ": " + f.description) +
                        "\nFree text (a JSON string, up to " + std::to_string(f.max_tokens) + " tokens)";
@@ -1405,7 +1439,8 @@ common_json assemble(const compiled_schema & cs, const result & r, bool with_pro
             common_json f     = common_json::object();
             decision[sp.name] = r.open_text;
             f["value"]        = r.open_text;
-            f["generated"]    = true;
+            f["generated"]    = !r.open_skipped;
+            f["skipped"]      = r.open_skipped;
             f["tokens"]       = r.open_tokens;
             f["truncated"]    = r.open_truncated;
             fields[sp.name]   = f;
