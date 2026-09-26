@@ -1053,13 +1053,43 @@ void engine::generate_open(llama_seq_id trunk, llama_pos pos0, const std::vector
     std::vector<float> scratch;
     llama_token next = sample_token(vocab, llama_get_logits_ith(ctx, last), opt.open_sampling, opt.open_temp, rng, scratch);
     r.has_open = true;
+    // Stop when the value is complete: a JSON string literal ends at its first unescaped quote (the model
+    // would otherwise go on to invent further fields), anything else at a comma, newline or brace.
+    auto value_end = [](const std::string & text) -> size_t {
+        size_t i = 0;
+        while (i < text.size() && std::isspace((unsigned char) text[i])) {
+            ++i;
+        }
+        if (i == text.size()) {
+            return std::string::npos;
+        }
+        if (text[i] != '"') {
+            const size_t stop = text.find_first_of(",\n}", i);
+            return stop;
+        }
+        for (size_t k = i + 1; k < text.size(); ++k) {
+            if (text[k] == '\\') {
+                ++k;
+            } else if (text[k] == '"') {
+                return k + 1;
+            }
+        }
+        return std::string::npos;
+    };
+    bool complete = false;
     for (int t = 0; t < open.max_tokens && !llama_vocab_is_eog(vocab, next); ++t) {
         r.open_text += common_token_to_piece(vocab, next);
         r.open_tokens += 1;
+        const size_t end = value_end(r.open_text);
+        if (end != std::string::npos) {
+            r.open_text.resize(end);
+            complete = true;
+            break;
+        }
         decode_one(next, pos0 + (llama_pos) (prefix.size() + t), "generation");
         next = sample_token(vocab, llama_get_logits_ith(ctx, 0), opt.open_sampling, opt.open_temp, rng, scratch);
     }
-    r.open_truncated = r.open_tokens == open.max_tokens && !llama_vocab_is_eog(vocab, next);
+    r.open_truncated = !complete && r.open_tokens == open.max_tokens && !llama_vocab_is_eog(vocab, next);
     r.open_text      = recover_open_text(std::move(r.open_text), r.open_truncated, std::string("{\n") + gen, open.name);
 }
 
