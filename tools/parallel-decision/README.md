@@ -398,6 +398,9 @@ or `max_tokens`. One HTTP call, one prefill.
 | `open_sampling` | `greedy` | open fields only: `greedy` (argmax, deterministic) or `temperature` |
 | `open_temp` | 0.7 | open fields only: temperature when `open_sampling` is `temperature` |
 
+This fork: the open field's prefix already holds the opening quote, so its value is always a JSON string; generation
+stops at the closing quote (the model would otherwise write further, invented fields until `max_tokens`).
+
 `"when": {"tool": ["search", "open_url"]}` on the open field generates it only when the named closed field won one
 of the listed values; otherwise the field comes back empty with `"skipped": true` and costs nothing (e.g. a tool
 argument when the chosen tool takes no text).
