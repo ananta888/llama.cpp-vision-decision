@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <list>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -109,7 +110,12 @@ int main(int argc, char ** argv) {
     params.model.path   = argv[1];
     params.n_gpu_layers = 999;
     params.fit_params   = false;
-    llm_add_n_cpu_ffn_overrides(std::stoi(argv[2]), LLM_FFN_EXPS_REGEX, params.tensor_buft_overrides);
+    // the first N_CPU_MOE layers keep their expert weights on the CPU (as --n-cpu-moe does)
+    static std::list<std::string> cpu_moe_patterns;
+    for (int i = 0; i < std::stoi(argv[2]); ++i) {
+        cpu_moe_patterns.push_back(llm_ffn_exps_block_regex(i));
+        params.tensor_buft_overrides.push_back({ cpu_moe_patterns.back().c_str(), ggml_backend_cpu_buffer_type() });
+    }
     if (!params.tensor_buft_overrides.empty()) {
         params.tensor_buft_overrides.push_back({ nullptr, nullptr });
     }
