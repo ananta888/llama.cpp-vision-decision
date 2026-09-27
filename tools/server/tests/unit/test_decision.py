@@ -428,3 +428,91 @@ def test_decision_cache_yields_to_chat():
     # a chat prompt that only fits when the cached decision context is given back
     res = server.make_request("POST", "/completion", data={"prompt": long_text + " And then", "n_predict": 4, "cache_prompt": False})
     assert res.status_code == 200, res.body
+
+
+# ---- hybrid decisions: one bounded open field next to the closed fields
+
+OPEN = {"type": "string", "max_tokens": 12, "description": "One short sentence about what is shown."}
+
+
+def test_decision_open_field():
+    global server
+    server.start()
+    body = decide({"schema": {**SCHEMA, "note": OPEN}, "contexts": ["A photo of a small grey cat.", "A red truck on a road."]})
+    for r in body["results"]:
+        note = r["fields"]["note"]
+        assert r["decision"]["label"] in LABELS and r["decision"]["note"] == note["value"]
+        assert isinstance(note["value"], str) and note["generated"] is True and note["skipped"] is False
+        assert 0 < note["tokens"] <= 12 and isinstance(note["truncated"], bool)
+        # a finished string literal ends the generation: the value is the text, never the rest of the JSON
+        assert '"' not in note["value"] or note["truncated"]
+        assert r["usage"]["generated_tokens"] == note["tokens"]
+    assert body["usage"]["generated_tokens"] == sum(r["fields"]["note"]["tokens"] for r in body["results"])
+    assert body["timings"]["generation_ms"] > 0
+    # generating does not change the scoring: the same schema (same prompt) with the generation skipped
+    # scores the closed fields identically. (Adding the field itself changes the prompt, like any field.)
+    skip = {**OPEN, "when": {"animal": [True]}}
+    for context in ["A photo of a small grey cat.", "A red truck on a road."]:
+        full = decide({"schema": {**SCHEMA, "note": OPEN}, "contexts": [context], "mode": "tree"})["results"][0]
+        cond = decide({"schema": {**SCHEMA, "note": skip}, "contexts": [context], "mode": "tree"})["results"][0]
+        for name in SCHEMA:
+            assert full["decision"][name] == cond["decision"][name]
+            assert abs(full["fields"][name]["probability"] - cond["fields"][name]["probability"]) < 1e-4
+        assert cond["fields"]["note"]["skipped"] is (cond["decision"]["animal"] is not True)
+
+
+def test_decision_open_field_when():
+    global server
+    server.start()
+    context = ["A photo of a small grey cat."]
+    # the label as scored under the hybrid prompt ("when" does not change the prompt)
+    label = decide({"schema": {**SCHEMA, "note": {**OPEN, "when": {"label": LABELS}}}, "contexts": context,
+                    "mode": "tree"})["results"][0]["decision"]["label"]
+    other = next(value for value in LABELS if value != label)
+    for listed, skipped in (([label], False), ([other], True), (LABELS, False)):
+        note = decide({"schema": {**SCHEMA, "note": {**OPEN, "when": {"label": listed}}}, "contexts": context,
+                       "mode": "tree"})["results"][0]["fields"]["note"]
+        assert note["skipped"] is skipped and note["generated"] is not skipped
+        if skipped:
+            assert note["value"] == "" and note["tokens"] == 0
+
+
+def test_decision_open_field_after_images_and_from_the_context_cache():
+    global server
+    server.decision_ctx_cache = 2
+    server.start()
+    req = {"schema": {**SCHEMA, "note": OPEN}, "contexts": [image_context([0]), "A frog in a pond."], "mode": "tree"}
+    first = decide(req)
+    again = decide(req)
+    # generating on the trunk must not touch the cached context: same context, same greedy text
+    assert again["usage"]["contexts_cached"] == 2
+    for a, b in zip(first["results"], again["results"]):
+        assert a["decision"] == b["decision"] and a["fields"]["note"] == b["fields"]["note"]
+    # the tiny model ends the text at once after an image; after the text context it writes
+    assert first["results"][1]["fields"]["note"]["tokens"] > 0
+
+
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        ({"a": OPEN, "b": OPEN}, "at most one open"),
+        ({"note": {**OPEN, "max_tokens": 0}}, "max_tokens between 1 and 1024"),
+        ({"note": {**OPEN, "max_tokens": 1025}}, "max_tokens between 1 and 1024"),
+        ({"note": {**OPEN, "nullable": True}}, "cannot be nullable"),
+        ({"note": {**OPEN, "when": {"missing": ["x"]}}}, "names no closed field"),
+        ({"note": {**OPEN, "when": {"label": ["dog"]}}}, "does not allow"),
+        ({"note": {**OPEN, "when": {"label": []}}}, "when must be"),
+    ]
+)
+def test_decision_open_field_errors(extra, message):
+    global server
+    server.start()
+    res = server.make_request("POST", "/v1/decision", data={"schema": {**SCHEMA, **extra}, "contexts": ["x"]})
+    assert res.status_code == 400
+    assert message in res.body["error"]["message"]
+    res = server.make_request("POST", "/v1/decision", data={"schema": {"note": OPEN}, "contexts": ["x"]})
+    assert res.status_code == 400 and "at least one closed field" in res.body["error"]["message"]
+    res = server.make_request("POST", "/v1/decision", data={"schema": SCHEMA, "contexts": ["x"], "open_sampling": "beam"})
+    assert res.status_code == 400 and "open_sampling" in res.body["error"]["message"]
+    # nothing is left behind
+    decide({"schema": {**SCHEMA, "note": OPEN}, "contexts": ["A red truck on a road."]})
