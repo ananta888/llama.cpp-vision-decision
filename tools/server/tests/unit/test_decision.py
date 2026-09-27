@@ -444,8 +444,8 @@ def test_decision_open_field():
         assert r["decision"]["label"] in LABELS and r["decision"]["note"] == note["value"]
         assert isinstance(note["value"], str) and note["generated"] is True and note["skipped"] is False
         assert 0 < note["tokens"] <= 12 and isinstance(note["truncated"], bool)
-        # a finished string literal ends the generation: the value is the text, never the rest of the JSON
-        assert '"' not in note["value"] or note["truncated"]
+        # the closing quote ends the generation: the value is the text, never the rest of the JSON
+        assert '",' not in note["value"] and '"note"' not in note["value"]
         assert r["usage"]["generated_tokens"] == note["tokens"]
     assert body["usage"]["generated_tokens"] == sum(r["fields"]["note"]["tokens"] for r in body["results"])
     assert body["timings"]["generation_ms"] > 0

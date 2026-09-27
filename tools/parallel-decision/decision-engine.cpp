@@ -253,45 +253,21 @@ llama_token sample_token(const llama_vocab * vocab, const float * logits, const 
     return (llama_token) dist(rng);
 }
 
-// The open field is the last field of the JSON answer: the model writes its value as a JSON string
-// literal and closes the object. Primary: json_head ("{\n" + the closed fields + the open suffix) plus
-// the generated tail is the whole object; read the field from it. Fallback: strip whitespace and
-// quotes and parse the string literal.
-std::string recover_open_text(std::string text, bool truncated, const std::string & json_head, const std::string & field_name) {
-    if (!truncated && !field_name.empty()) {
+// The open field's suffix ends with the opening quote, so the generated text is the inside of a JSON
+// string literal up to its closing quote. Unescape it; text the parser rejects (or a truncated literal)
+// is returned as it is.
+std::string recover_open_text(const std::string & inside, bool truncated) {
+    if (!truncated) {
         try {
-            const auto obj = common_json::parse(json_head + text);
-            if (obj.is_object() && obj.contains(field_name) && obj.at(field_name).is_string()) {
-                return obj.at(field_name).get<std::string>();
+            const auto parsed = common_json::parse("\"" + inside + "\"");
+            if (parsed.is_string()) {
+                return parsed.get<std::string>();
             }
         } catch (...) {
-            // the tail is not a complete JSON object; fall through to literal recovery
+            // the model escaped something the parser rejects; keep the raw text
         }
     }
-    size_t start = 0;
-    while (start < text.size() && std::isspace((unsigned char) text[start])) {
-        ++start;
-    }
-    text = text.substr(start);
-    if (!text.empty() && text[0] == '"') {
-        text.erase(0, 1);
-        if (!truncated) {
-            const size_t q = text.rfind('"');
-            if (q != std::string::npos) {
-                const std::string lit = text.substr(0, q);
-                try {
-                    const auto parsed = common_json::parse(std::string("\"") + lit + "\"");
-                    if (parsed.is_string()) {
-                        return parsed.get<std::string>();
-                    }
-                } catch (...) {
-                    // the model escaped something the parser rejects; keep the raw text
-                }
-                text = lit;
-            }
-        }
-    }
-    return text;
+    return inside;
 }
 
 } // namespace
@@ -1060,25 +1036,14 @@ void engine::generate_open(llama_seq_id trunk, llama_pos pos0, const std::vector
     std::mt19937       rng(std::random_device{}());
     std::vector<float> scratch;
     llama_token next = sample_token(vocab, llama_get_logits_ith(ctx, last), opt.open_sampling, opt.open_temp, rng, scratch);
-    // Stop when the value is complete: a JSON string literal ends at its first unescaped quote (the model
-    // would otherwise go on to invent further fields), anything else at a comma, newline or brace.
+    // The suffix opened the string, so the value is always a string: it ends at the first unescaped quote
+    // (the model would otherwise go on to invent further fields).
     auto value_end = [](const std::string & text) -> size_t {
-        size_t i = 0;
-        while (i < text.size() && std::isspace((unsigned char) text[i])) {
-            ++i;
-        }
-        if (i == text.size()) {
-            return std::string::npos;
-        }
-        if (text[i] != '"') {
-            const size_t stop = text.find_first_of(",\n}", i);
-            return stop;
-        }
-        for (size_t k = i + 1; k < text.size(); ++k) {
+        for (size_t k = 0; k < text.size(); ++k) {
             if (text[k] == '\\') {
                 ++k;
             } else if (text[k] == '"') {
-                return k + 1;
+                return k;
             }
         }
         return std::string::npos;
@@ -1097,7 +1062,7 @@ void engine::generate_open(llama_seq_id trunk, llama_pos pos0, const std::vector
         next = sample_token(vocab, llama_get_logits_ith(ctx, 0), opt.open_sampling, opt.open_temp, rng, scratch);
     }
     r.open_truncated = !complete && r.open_tokens == open.max_tokens && !llama_vocab_is_eog(vocab, next);
-    r.open_text      = recover_open_text(std::move(r.open_text), r.open_truncated, std::string("{\n") + gen, open.name);
+    r.open_text      = recover_open_text(r.open_text, r.open_truncated);
 }
 
 // ---------------------------------------------------------------- schema compiler
@@ -1331,7 +1296,7 @@ compiled_schema compile_schema(const common_json & schema, const std::string & i
         if (f.is_open) {
             field_input in;
             in.name       = f.name;
-            in.suffix     = "  " + json_text(f.name) + ": ";
+            in.suffix     = "  " + json_text(f.name) + ": \""; // the value is a string: its quote is given
             in.max_tokens = f.max_tokens;
             if (f.when.is_object()) {
                 // resolve {"field": [values]} to the closed field's index and the candidate indices of the values
